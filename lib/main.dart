@@ -37,12 +37,6 @@ class MainCategory {
   const MainCategory({required this.id, required this.name, required this.hindiName, required this.imageUrl});
 }
 
-class SubCategory {
-  final String id, mainCategoryId, name, imageUrl;
-  final Color bgColor;
-  const SubCategory({required this.id, required this.mainCategoryId, required this.name, required this.imageUrl, required this.bgColor});
-}
-
 class PackOption {
   final String label;
   final double price, mrp;
@@ -50,14 +44,13 @@ class PackOption {
 }
 
 class ProductItem {
-  final String id, mainCategoryId, subCategoryId, name, imageUrl;
+  final String id, mainCategoryId, name, imageUrl;
   final int discountPercent;
   final Color cardBg;
   final List packs;
   const ProductItem({
     required this.id,
     required this.mainCategoryId,
-    required this.subCategoryId,
     required this.name,
     required this.discountPercent,
     required this.imageUrl,
@@ -79,11 +72,8 @@ class _MainNavigationScreenState extends State {
   String? _errorMessage;
 
   List _mainCategories = [];
-  List _allSubCategories = [];
   List _allProducts = [];
-
   String _selectedMainCatId = 'fruits';
-  String _selectedSubCatId = 'all';
   String _searchQuery = '';
 
   final _searchCtrl = TextEditingController();
@@ -174,7 +164,6 @@ class _MainNavigationScreenState extends State {
     });
     try {
       final mRes = await _supabase.from('deua_main_categories').select().order('sort_order');
-      final sRes = await _supabase.from('deua_sub_categories').select().order('sort_order');
       final pRes = await _supabase.from('deua_products').select().eq('in_stock', true).order('created_at');
 
       final List mains = [];
@@ -185,18 +174,6 @@ class _MainNavigationScreenState extends State {
           name: (r['name'] ?? '').toString(),
           hindiName: (r['hindi_name'] ?? '').toString(),
           imageUrl: (r['image_url'] ?? _basketBannerUrl).toString(),
-        ));
-      }
-
-      final List subs = [];
-      for (final x in (sRes as List)) {
-        final r = Map.from(x as Map);
-        subs.add(SubCategory(
-          id: r['id'].toString(),
-          mainCategoryId: (r['main_category_id'] ?? '').toString(),
-          name: (r['name'] ?? '').toString(),
-          imageUrl: (r['image_url'] ?? _basketBannerUrl).toString(),
-          bgColor: _hexColor(r['bg_color']?.toString(), const Color(0xFFE8F5E9)),
         ));
       }
 
@@ -217,7 +194,6 @@ class _MainNavigationScreenState extends State {
         prods.add(ProductItem(
           id: r['id'].toString(),
           mainCategoryId: (r['main_category_id'] ?? '').toString(),
-          subCategoryId: (r['sub_category_id'] ?? '').toString(),
           name: (r['name'] ?? '').toString(),
           discountPercent: (r['discount_percent'] as num? ?? 0).toInt(),
           imageUrl: (r['image_url'] ?? '').toString(),
@@ -228,8 +204,14 @@ class _MainNavigationScreenState extends State {
 
       setState(() {
         _mainCategories = mains;
-        _allSubCategories = subs;
         _allProducts = prods;
+        if (_mainCategories.isNotEmpty) {
+          bool exists = false;
+          for (final m in _mainCategories) {
+            if ((m as MainCategory).id == _selectedMainCatId) exists = true;
+          }
+          if (!exists) _selectedMainCatId = (_mainCategories.first as MainCategory).id;
+        }
         _isLoading = false;
       });
     } catch (_) {
@@ -264,7 +246,6 @@ class _MainNavigationScreenState extends State {
   void _openCategory(String mainId) {
     setState(() {
       _selectedMainCatId = mainId;
-      _selectedSubCatId = 'all';
       _searchQuery = '';
       _searchCtrl.clear();
       _currentTab = 1;
@@ -642,7 +623,7 @@ class _MainNavigationScreenState extends State {
     final List deals = [];
     for (final x in _allProducts) {
       final p = x as ProductItem;
-      if (p.discountPercent >= 15) deals.add(p);
+      if (p.discountPercent >= 18) deals.add(p);
     }
 
     return SafeArea(
@@ -686,7 +667,7 @@ class _MainNavigationScreenState extends State {
                       controller: _searchCtrl,
                       onChanged: (v) => setState(() => _searchQuery = v),
                       decoration: InputDecoration(
-                        hintText: 'खोजें: सेब (Apple), टमाटर, काजू...',
+                        hintText: 'खोजें: सेब, टमाटर, दाल, मसाले, दूध...',
                         prefixIcon: const Icon(Icons.search, color: Color(0xFF1B7A2B)),
                         suffixIcon: _searchQuery.isNotEmpty
                             ? IconButton(
@@ -730,7 +711,7 @@ class _MainNavigationScreenState extends State {
                         children: [
                           const Text('UP TO 25% OFF • भारी छूट', style: TextStyle(color: Color(0xFF1B7A2B), fontWeight: FontWeight.w900, fontSize: 11.5)),
                           const SizedBox(height: 4),
-                          const Text('ताज़े फल, हरी सब्ज़ी व ड्राई फ्रूट्स\nFresh Fruits, Veg & Dry Items', style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.bold)),
+                          const Text('फल, सब्ज़ी, किराना, मसाले व डेयरी\nFruits, Veg, Grocery & Dairy', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
                           const SizedBox(height: 8),
                           ElevatedButton(
                             style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1B7A2B), foregroundColor: Colors.white),
@@ -750,36 +731,42 @@ class _MainNavigationScreenState extends State {
               ),
               const Padding(
                 padding: EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                child: Text('फल, सब्ज़ी व किराना • Shop by Category', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+                child: Text('सभी श्रेणियां • Shop by Category', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
               ),
-              Padding(
+              GridView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
                 padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: Row(
-                  children: _mainCategories.map((x) {
-                    final cat = x as MainCategory;
-                    return Expanded(
-                      child: GestureDetector(
-                        onTap: () => _openCategory(cat.id),
-                        child: Container(
-                          margin: const EdgeInsets.symmetric(horizontal: 4),
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
-                          child: Column(
-                            children: [
-                              ClipRRect(
-                                borderRadius: BorderRadius.circular(10),
-                                child: _netImg(cat.imageUrl, width: double.infinity, height: 68),
-                              ),
-                              const SizedBox(height: 6),
-                              Text(cat.hindiName.isNotEmpty ? cat.hindiName : cat.name, textAlign: TextAlign.center, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5)),
-                              Text(cat.name, textAlign: TextAlign.center, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 10.5, color: Colors.black54)),
-                            ],
-                          ),
-                        ),
-                      ),
-                    );
-                  }).toList(),
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 3,
+                  childAspectRatio: 0.85,
+                  crossAxisSpacing: 8,
+                  mainAxisSpacing: 8,
                 ),
+                itemCount: _mainCategories.length,
+                itemBuilder: (_, i) {
+                  final cat = _mainCategories[i] as MainCategory;
+                  return GestureDetector(
+                    onTap: () => _openCategory(cat.id),
+                    child: Container(
+                      padding: const EdgeInsets.all(6),
+                      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
+                      child: Column(
+                        children: [
+                          Expanded(
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(9),
+                              child: _netImg(cat.imageUrl, width: double.infinity),
+                            ),
+                          ),
+                          const SizedBox(height: 5),
+                          Text(cat.hindiName.isNotEmpty ? cat.hindiName : cat.name, textAlign: TextAlign.center, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11.5)),
+                          Text(cat.name, textAlign: TextAlign.center, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 9.5, color: Colors.black54)),
+                        ],
+                      ),
+                    ),
+                  );
+                },
               ),
               const Padding(
                 padding: EdgeInsets.fromLTRB(14, 14, 14, 8),
@@ -801,18 +788,10 @@ class _MainNavigationScreenState extends State {
   }
 
   Widget _categoriesTab() {
-    final List subs = [
-      SubCategory(id: 'all', mainCategoryId: _selectedMainCatId, name: 'सभी आइटम (All)', imageUrl: _basketBannerUrl, bgColor: const Color(0xFFFFF3E0)),
-    ];
-    for (final x in _allSubCategories) {
-      final s = x as SubCategory;
-      if (s.mainCategoryId == _selectedMainCatId) subs.add(s);
-    }
-
     final List prods = [];
     for (final x in _allProducts) {
       final p = x as ProductItem;
-      if (p.mainCategoryId == _selectedMainCatId && (_selectedSubCatId == 'all' || p.subCategoryId == _selectedSubCatId)) {
+      if (p.mainCategoryId == _selectedMainCatId) {
         prods.add(p);
       }
     }
@@ -820,69 +799,65 @@ class _MainNavigationScreenState extends State {
     return Scaffold(
       appBar: AppBar(
         backgroundColor: Colors.white,
+        elevation: 0.5,
         title: const Text('सभी श्रेणियां • All Categories', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17)),
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(52),
-          child: SizedBox(
-            height: 52,
-            child: ListView.separated(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              scrollDirection: Axis.horizontal,
-              itemCount: _mainCategories.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 8),
-              itemBuilder: (_, i) {
-                final m = _mainCategories[i] as MainCategory;
-                final sel = m.id == _selectedMainCatId;
-                final label = m.hindiName.isNotEmpty ? '${m.hindiName} (${m.name})' : m.name;
-                return ChoiceChip(
-                  avatar: ClipOval(child: _netImg(m.imageUrl, width: 24, height: 24, iconSize: 16)),
-                  label: Text(label),
-                  selected: sel,
-                  selectedColor: const Color(0xFF1B7A2B),
-                  labelStyle: TextStyle(color: sel ? Colors.white : Colors.black87, fontWeight: FontWeight.bold, fontSize: 12),
-                  onSelected: (_) => setState(() {
-                    _selectedMainCatId = m.id;
-                    _selectedSubCatId = 'all';
-                  }),
-                );
-              },
-            ),
-          ),
-        ),
       ),
       body: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
-            width: 88,
+            width: 98,
             color: Colors.white,
             child: ListView.builder(
-              itemCount: subs.length,
+              itemCount: _mainCategories.length,
               itemBuilder: (_, i) {
-                final s = subs[i] as SubCategory;
-                final sel = s.id == _selectedSubCatId;
+                final cat = _mainCategories[i] as MainCategory;
+                final sel = cat.id == _selectedMainCatId;
+                int count = 0;
+                for (final item in _allProducts) {
+                  if ((item as ProductItem).mainCategoryId == cat.id) count++;
+                }
                 return InkWell(
-                  onTap: () => setState(() => _selectedSubCatId = s.id),
+                  onTap: () => setState(() => _selectedMainCatId = cat.id),
                   child: Container(
-                    padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
+                    padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 6),
                     decoration: BoxDecoration(
                       color: sel ? const Color(0xFFE8F5E9) : Colors.white,
-                      border: Border(right: BorderSide(color: sel ? const Color(0xFF1B7A2B) : Colors.transparent, width: 3)),
+                      border: Border(right: BorderSide(color: sel ? const Color(0xFF1B7A2B) : Colors.transparent, width: 3.5)),
                     ),
                     child: Column(
                       children: [
                         Container(
-                          width: 48,
-                          height: 48,
+                          width: 52,
+                          height: 52,
                           padding: const EdgeInsets.all(2),
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
                             border: Border.all(color: sel ? const Color(0xFF1B7A2B) : Colors.black12, width: 2),
                           ),
-                          child: ClipOval(child: _netImg(s.imageUrl, width: 44, height: 44, iconSize: 20)),
+                          child: ClipOval(child: _netImg(cat.imageUrl, width: 48, height: 48, iconSize: 22)),
                         ),
                         const SizedBox(height: 5),
-                        Text(s.name, textAlign: TextAlign.center, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 10.5, fontWeight: sel ? FontWeight.bold : FontWeight.w500)),
+                        Text(
+                          cat.hindiName.isNotEmpty ? cat.hindiName : cat.name,
+                          textAlign: TextAlign.center,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontSize: 11, fontWeight: sel ? FontWeight.w800 : FontWeight.w600, color: sel ? const Color(0xFF1B7A2B) : Colors.black87),
+                        ),
+                        Text(
+                          cat.name,
+                          textAlign: TextAlign.center,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 9, color: Colors.black54),
+                        ),
+                        const SizedBox(height: 3),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 1),
+                          decoration: BoxDecoration(color: const Color(0xFFF1F3F5), borderRadius: BorderRadius.circular(10)),
+                          child: Text('$count', style: const TextStyle(fontSize: 9.5, fontWeight: FontWeight.bold, color: Colors.black54)),
+                        ),
                       ],
                     ),
                   ),
@@ -891,12 +866,14 @@ class _MainNavigationScreenState extends State {
             ),
           ),
           Expanded(
-            child: GridView.builder(
-              padding: const EdgeInsets.fromLTRB(8, 8, 8, 80),
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2, childAspectRatio: 0.56, crossAxisSpacing: 8, mainAxisSpacing: 8),
-              itemCount: prods.length,
-              itemBuilder: (_, i) => _productCard(prods[i] as ProductItem),
-            ),
+            child: prods.isEmpty
+                ? const Center(child: Text('इस श्रेणी में अभी कोई सामान नहीं है'))
+                : GridView.builder(
+                    padding: const EdgeInsets.fromLTRB(8, 8, 8, 80),
+                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2, childAspectRatio: 0.56, crossAxisSpacing: 8, mainAxisSpacing: 8),
+                    itemCount: prods.length,
+                    itemBuilder: (_, i) => _productCard(prods[i] as ProductItem),
+                  ),
           ),
         ],
       ),
