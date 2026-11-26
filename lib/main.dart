@@ -33,14 +33,14 @@ class DeuaCustomerApp extends StatelessWidget {
 }
 
 class MainCategory {
-  final String id, name, hindiName, emoji;
-  const MainCategory({required this.id, required this.name, required this.hindiName, required this.emoji});
+  final String id, name, hindiName, imageUrl;
+  const MainCategory({required this.id, required this.name, required this.hindiName, required this.imageUrl});
 }
 
 class SubCategory {
-  final String id, mainCategoryId, name, emoji;
+  final String id, mainCategoryId, name, imageUrl;
   final Color bgColor;
-  const SubCategory({required this.id, required this.mainCategoryId, required this.name, required this.emoji, required this.bgColor});
+  const SubCategory({required this.id, required this.mainCategoryId, required this.name, required this.imageUrl, required this.bgColor});
 }
 
 class PackOption {
@@ -50,7 +50,7 @@ class PackOption {
 }
 
 class ProductItem {
-  final String id, mainCategoryId, subCategoryId, name, imageUrl, fallbackEmoji;
+  final String id, mainCategoryId, subCategoryId, name, imageUrl;
   final int discountPercent;
   final Color cardBg;
   final List packs;
@@ -61,7 +61,6 @@ class ProductItem {
     required this.name,
     required this.discountPercent,
     required this.imageUrl,
-    required this.fallbackEmoji,
     required this.cardBg,
     required this.packs,
   });
@@ -99,6 +98,8 @@ class _MainNavigationScreenState extends State {
   String _savedName = '';
   String _savedPhone = '';
   String _savedAddress = 'Deua Village, Bihar';
+
+  static const String _basketBannerUrl = 'https://images.unsplash.com/photo-1610832958506-aa56368176cf?w=400';
 
   @override
   void initState() {
@@ -153,6 +154,19 @@ class _MainNavigationScreenState extends State {
     return null;
   }
 
+  Widget _netImg(String url, {double? width, double? height, double iconSize = 28}) {
+    if (url.isEmpty) {
+      return Icon(Icons.eco, color: const Color(0xFF1B7A2B), size: iconSize);
+    }
+    return Image.network(
+      url,
+      width: width,
+      height: height,
+      fit: BoxFit.cover,
+      errorBuilder: (_, __, ___) => Icon(Icons.eco, color: const Color(0xFF1B7A2B), size: iconSize),
+    );
+  }
+
   Future _fetchCatalog() async {
     setState(() {
       _isLoading = true;
@@ -170,7 +184,7 @@ class _MainNavigationScreenState extends State {
           id: r['id'].toString(),
           name: (r['name'] ?? '').toString(),
           hindiName: (r['hindi_name'] ?? '').toString(),
-          emoji: (r['emoji'] ?? '🧺').toString(),
+          imageUrl: (r['image_url'] ?? _basketBannerUrl).toString(),
         ));
       }
 
@@ -181,7 +195,7 @@ class _MainNavigationScreenState extends State {
           id: r['id'].toString(),
           mainCategoryId: (r['main_category_id'] ?? '').toString(),
           name: (r['name'] ?? '').toString(),
-          emoji: (r['emoji'] ?? '🌿').toString(),
+          imageUrl: (r['image_url'] ?? _basketBannerUrl).toString(),
           bgColor: _hexColor(r['bg_color']?.toString(), const Color(0xFFE8F5E9)),
         ));
       }
@@ -207,7 +221,6 @@ class _MainNavigationScreenState extends State {
           name: (r['name'] ?? '').toString(),
           discountPercent: (r['discount_percent'] as num? ?? 0).toInt(),
           imageUrl: (r['image_url'] ?? '').toString(),
-          fallbackEmoji: (r['fallback_emoji'] ?? '🧺').toString(),
           cardBg: _hexColor(r['card_bg']?.toString(), const Color(0xFFF1F8E9)),
           packs: packs,
         ));
@@ -313,9 +326,7 @@ class _MainNavigationScreenState extends State {
                     height: 190,
                     width: double.infinity,
                     color: item.cardBg,
-                    child: item.imageUrl.isNotEmpty
-                        ? Image.network(item.imageUrl, fit: BoxFit.cover, errorBuilder: (_, __, ___) => Center(child: Text(item.fallbackEmoji, style: const TextStyle(fontSize: 64))))
-                        : Center(child: Text(item.fallbackEmoji, style: const TextStyle(fontSize: 64))),
+                    child: _netImg(item.imageUrl, iconSize: 56),
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -380,7 +391,7 @@ class _MainNavigationScreenState extends State {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Your Basket ($_cartCount items)', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  Text('आपकी टोकरी • Your Basket ($_cartCount items)', style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
                   const Divider(),
                   ...entries.map((e) {
                     final parts = e.key.toString().split('::');
@@ -416,11 +427,11 @@ class _MainNavigationScreenState extends State {
                     );
                   }),
                   const Divider(),
-                  TextField(controller: nCtrl, decoration: const InputDecoration(labelText: 'Aapka Naam', border: OutlineInputBorder(), isDense: true)),
+                  TextField(controller: nCtrl, decoration: const InputDecoration(labelText: 'आपका नाम (Your Name)', border: OutlineInputBorder(), isDense: true)),
                   const SizedBox(height: 8),
-                  TextField(controller: pCtrl, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: 'Mobile Number', border: OutlineInputBorder(), isDense: true)),
+                  TextField(controller: pCtrl, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: 'मोबाइल नंबर (Mobile Number)', border: OutlineInputBorder(), isDense: true)),
                   const SizedBox(height: 8),
-                  TextField(controller: aCtrl, maxLines: 2, decoration: const InputDecoration(labelText: 'Delivery Address', border: OutlineInputBorder(), isDense: true)),
+                  TextField(controller: aCtrl, maxLines: 2, decoration: const InputDecoration(labelText: 'पूरा पता (Delivery Address)', border: OutlineInputBorder(), isDense: true)),
                   const SizedBox(height: 8),
                   Wrap(
                     spacing: 8,
@@ -444,7 +455,7 @@ class _MainNavigationScreenState extends State {
                         final phone = pCtrl.text.trim();
                         final addr = aCtrl.text.trim();
                         if (name.isEmpty || phone.length < 10 || addr.isEmpty) {
-                          messenger.showSnackBar(const SnackBar(content: Text('Naam, 10-digit mobile aur address bharein.'), backgroundColor: Colors.red));
+                          messenger.showSnackBar(const SnackBar(content: Text('कृपया नाम, 10-अंकों का मोबाइल नंबर और पता भरें।'), backgroundColor: Colors.red));
                           return;
                         }
                         setModal(() => busy = true);
@@ -473,13 +484,13 @@ class _MainNavigationScreenState extends State {
                             _cart.clear();
                             _currentTab = 2;
                           });
-                          messenger.showSnackBar(const SnackBar(content: Text('Order Confirm Ho Gaya!'), backgroundColor: Color(0xFF1B7A2B)));
+                          messenger.showSnackBar(const SnackBar(content: Text('ऑर्डर कन्फर्म हो गया! Order Confirmed'), backgroundColor: Color(0xFF1B7A2B)));
                         } catch (_) {
                           setModal(() => busy = false);
-                          messenger.showSnackBar(const SnackBar(content: Text('Order fail hua, dobara try karein.'), backgroundColor: Colors.red));
+                          messenger.showSnackBar(const SnackBar(content: Text('ऑर्डर भेजने में समस्या आई, पुनः प्रयास करें।'), backgroundColor: Colors.red));
                         }
                       },
-                      child: Text(busy ? 'Placing Order...' : 'Confirm Order • ₹${_cartTotal.toStringAsFixed(0)}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                      child: Text(busy ? 'ऑर्डर हो रहा है...' : 'ऑर्डर कन्फर्म करें • ₹${_cartTotal.toStringAsFixed(0)}', style: const TextStyle(fontWeight: FontWeight.bold)),
                     ),
                   ),
                 ],
@@ -514,9 +525,7 @@ class _MainNavigationScreenState extends State {
                     child: Container(
                       width: double.infinity,
                       color: item.cardBg,
-                      child: item.imageUrl.isNotEmpty
-                          ? Image.network(item.imageUrl, fit: BoxFit.cover, errorBuilder: (_, __, ___) => Center(child: Text(item.fallbackEmoji, style: const TextStyle(fontSize: 44))))
-                          : Center(child: Text(item.fallbackEmoji, style: const TextStyle(fontSize: 44))),
+                      child: _netImg(item.imageUrl, iconSize: 40),
                     ),
                   ),
                   if (item.discountPercent > 0)
@@ -661,7 +670,7 @@ class _MainNavigationScreenState extends State {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text('DEUA FRESH • Express Delivery', style: TextStyle(color: Colors.amberAccent, fontSize: 11, fontWeight: FontWeight.bold)),
+                              const Text('DEUA FRESH • ताज़ा व तेज़ डिलीवरी', style: TextStyle(color: Colors.amberAccent, fontSize: 11, fontWeight: FontWeight.bold)),
                               Text(_savedAddress, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                             ],
                           ),
@@ -677,7 +686,7 @@ class _MainNavigationScreenState extends State {
                       controller: _searchCtrl,
                       onChanged: (v) => setState(() => _searchQuery = v),
                       decoration: InputDecoration(
-                        hintText: 'Search Apple, Tamatar, Kaju...',
+                        hintText: 'खोजें: सेब (Apple), टमाटर, काजू...',
                         prefixIcon: const Icon(Icons.search, color: Color(0xFF1B7A2B)),
                         suffixIcon: _searchQuery.isNotEmpty
                             ? IconButton(
@@ -698,7 +707,7 @@ class _MainNavigationScreenState extends State {
             if (_searchQuery.isNotEmpty) ...[
               Padding(
                 padding: const EdgeInsets.all(14),
-                child: Text('Search Results (${searched.length})', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                child: Text('खोज परिणाम • Search Results (${searched.length})', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
               ),
               GridView.builder(
                 shrinkWrap: true,
@@ -719,25 +728,29 @@ class _MainNavigationScreenState extends State {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text('UP TO 25% OFF', style: TextStyle(color: Color(0xFF1B7A2B), fontWeight: FontWeight.w900, fontSize: 12)),
+                          const Text('UP TO 25% OFF • भारी छूट', style: TextStyle(color: Color(0xFF1B7A2B), fontWeight: FontWeight.w900, fontSize: 11.5)),
                           const SizedBox(height: 4),
-                          const Text('Taaza Phal, Hari Sabzi & Dry Fruits', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                          const Text('ताज़े फल, हरी सब्ज़ी व ड्राई फ्रूट्स\nFresh Fruits, Veg & Dry Items', style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.bold)),
                           const SizedBox(height: 8),
                           ElevatedButton(
                             style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1B7A2B), foregroundColor: Colors.white),
                             onPressed: () => _openCategory('fruits'),
-                            child: const Text('Shop Now'),
+                            child: const Text('अभी खरीदें • Shop Now'),
                           ),
                         ],
                       ),
                     ),
-                    const Text('🧺', style: TextStyle(fontSize: 52)),
+                    const SizedBox(width: 8),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: _netImg(_basketBannerUrl, width: 92, height: 92),
+                    ),
                   ],
                 ),
               ),
               const Padding(
                 padding: EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                child: Text('Shop by Category', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+                child: Text('फल, सब्ज़ी व किराना • Shop by Category', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
               ),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -749,14 +762,17 @@ class _MainNavigationScreenState extends State {
                         onTap: () => _openCategory(cat.id),
                         child: Container(
                           margin: const EdgeInsets.symmetric(horizontal: 4),
-                          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
+                          padding: const EdgeInsets.all(8),
                           decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
                           child: Column(
                             children: [
-                              Text(cat.emoji, style: const TextStyle(fontSize: 32)),
-                              const SizedBox(height: 4),
-                              Text(cat.hindiName.isNotEmpty ? cat.hindiName : cat.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                              Text(cat.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 10, color: Colors.grey)),
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(10),
+                                child: _netImg(cat.imageUrl, width: double.infinity, height: 68),
+                              ),
+                              const SizedBox(height: 6),
+                              Text(cat.hindiName.isNotEmpty ? cat.hindiName : cat.name, textAlign: TextAlign.center, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5)),
+                              Text(cat.name, textAlign: TextAlign.center, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 10.5, color: Colors.black54)),
                             ],
                           ),
                         ),
@@ -767,7 +783,7 @@ class _MainNavigationScreenState extends State {
               ),
               const Padding(
                 padding: EdgeInsets.fromLTRB(14, 14, 14, 8),
-                child: Text('Best Deals Today', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+                child: Text('आज के खास ऑफ़र • Best Deals Today', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
               ),
               GridView.builder(
                 shrinkWrap: true,
@@ -786,7 +802,7 @@ class _MainNavigationScreenState extends State {
 
   Widget _categoriesTab() {
     final List subs = [
-      SubCategory(id: 'all', mainCategoryId: _selectedMainCatId, name: 'All Items', emoji: '🧺', bgColor: const Color(0xFFFFF3E0)),
+      SubCategory(id: 'all', mainCategoryId: _selectedMainCatId, name: 'सभी आइटम (All)', imageUrl: _basketBannerUrl, bgColor: const Color(0xFFFFF3E0)),
     ];
     for (final x in _allSubCategories) {
       final s = x as SubCategory;
@@ -804,11 +820,11 @@ class _MainNavigationScreenState extends State {
     return Scaffold(
       appBar: AppBar(
         backgroundColor: Colors.white,
-        title: const Text('All Categories', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+        title: const Text('सभी श्रेणियां • All Categories', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17)),
         bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(48),
+          preferredSize: const Size.fromHeight(52),
           child: SizedBox(
-            height: 48,
+            height: 52,
             child: ListView.separated(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
               scrollDirection: Axis.horizontal,
@@ -817,11 +833,13 @@ class _MainNavigationScreenState extends State {
               itemBuilder: (_, i) {
                 final m = _mainCategories[i] as MainCategory;
                 final sel = m.id == _selectedMainCatId;
+                final label = m.hindiName.isNotEmpty ? '${m.hindiName} (${m.name})' : m.name;
                 return ChoiceChip(
-                  label: Text('${m.emoji} ${m.hindiName.isNotEmpty ? m.hindiName : m.name}'),
+                  avatar: ClipOval(child: _netImg(m.imageUrl, width: 24, height: 24, iconSize: 16)),
+                  label: Text(label),
                   selected: sel,
                   selectedColor: const Color(0xFF1B7A2B),
-                  labelStyle: TextStyle(color: sel ? Colors.white : Colors.black87, fontWeight: FontWeight.bold),
+                  labelStyle: TextStyle(color: sel ? Colors.white : Colors.black87, fontWeight: FontWeight.bold, fontSize: 12),
                   onSelected: (_) => setState(() {
                     _selectedMainCatId = m.id;
                     _selectedSubCatId = 'all';
@@ -836,7 +854,7 @@ class _MainNavigationScreenState extends State {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
-            width: 84,
+            width: 88,
             color: Colors.white,
             child: ListView.builder(
               itemCount: subs.length,
@@ -847,12 +865,24 @@ class _MainNavigationScreenState extends State {
                   onTap: () => setState(() => _selectedSubCatId = s.id),
                   child: Container(
                     padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
-                    color: sel ? const Color(0xFFE8F5E9) : Colors.white,
+                    decoration: BoxDecoration(
+                      color: sel ? const Color(0xFFE8F5E9) : Colors.white,
+                      border: Border(right: BorderSide(color: sel ? const Color(0xFF1B7A2B) : Colors.transparent, width: 3)),
+                    ),
                     child: Column(
                       children: [
-                        CircleAvatar(radius: 22, backgroundColor: sel ? const Color(0xFF1B7A2B) : s.bgColor, child: Text(s.emoji, style: const TextStyle(fontSize: 20))),
-                        const SizedBox(height: 4),
-                        Text(s.name, textAlign: TextAlign.center, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 10.5, fontWeight: sel ? FontWeight.bold : FontWeight.normal)),
+                        Container(
+                          width: 48,
+                          height: 48,
+                          padding: const EdgeInsets.all(2),
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            border: Border.all(color: sel ? const Color(0xFF1B7A2B) : Colors.black12, width: 2),
+                          ),
+                          child: ClipOval(child: _netImg(s.imageUrl, width: 44, height: 44, iconSize: 20)),
+                        ),
+                        const SizedBox(height: 5),
+                        Text(s.name, textAlign: TextAlign.center, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 10.5, fontWeight: sel ? FontWeight.bold : FontWeight.w500)),
                       ],
                     ),
                   ),
@@ -875,15 +905,15 @@ class _MainNavigationScreenState extends State {
 
   Widget _profileTab() {
     return Scaffold(
-      appBar: AppBar(backgroundColor: Colors.white, title: const Text('My Profile & Address', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18))),
+      appBar: AppBar(backgroundColor: Colors.white, title: const Text('प्रोफ़ाइल व पता • Profile & Address', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17))),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          TextField(controller: _nameCtrl, decoration: const InputDecoration(labelText: 'Aapka Naam', filled: true, fillColor: Colors.white, border: OutlineInputBorder())),
+          TextField(controller: _nameCtrl, decoration: const InputDecoration(labelText: 'आपका नाम (Your Name)', filled: true, fillColor: Colors.white, border: OutlineInputBorder())),
           const SizedBox(height: 12),
-          TextField(controller: _phoneCtrl, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: 'Mobile Number', filled: true, fillColor: Colors.white, border: OutlineInputBorder())),
+          TextField(controller: _phoneCtrl, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: 'मोबाइल नंबर (Mobile Number)', filled: true, fillColor: Colors.white, border: OutlineInputBorder())),
           const SizedBox(height: 12),
-          TextField(controller: _addrCtrl, maxLines: 2, decoration: const InputDecoration(labelText: 'Delivery Address', filled: true, fillColor: Colors.white, border: OutlineInputBorder())),
+          TextField(controller: _addrCtrl, maxLines: 2, decoration: const InputDecoration(labelText: 'डिलीवरी पता (Delivery Address)', filled: true, fillColor: Colors.white, border: OutlineInputBorder())),
           const SizedBox(height: 16),
           SizedBox(
             height: 46,
@@ -892,9 +922,9 @@ class _MainNavigationScreenState extends State {
               onPressed: () async {
                 final messenger = ScaffoldMessenger.of(context);
                 await _saveCustomer(_nameCtrl.text.trim(), _phoneCtrl.text.trim(), _addrCtrl.text.trim());
-                messenger.showSnackBar(const SnackBar(content: Text('Address Save Ho Gaya!'), backgroundColor: Color(0xFF1B7A2B)));
+                messenger.showSnackBar(const SnackBar(content: Text('पता सेव हो गया! Address Saved'), backgroundColor: Color(0xFF1B7A2B)));
               },
-              child: const Text('Save Details', style: TextStyle(fontWeight: FontWeight.bold)),
+              child: const Text('सेव करें • Save Details', style: TextStyle(fontWeight: FontWeight.bold)),
             ),
           ),
         ],
@@ -943,7 +973,7 @@ class _MainNavigationScreenState extends State {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text('$_cartCount Items • ₹${_cartTotal.toStringAsFixed(0)}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                      const Text('View Cart & Order >', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                      const Text('टोकरी देखें • View Cart >', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                     ],
                   ),
                 ),
@@ -1012,7 +1042,7 @@ class _OrdersTabViewState extends State {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(backgroundColor: Colors.white, title: const Text('My Orders', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18))),
+      appBar: AppBar(backgroundColor: Colors.white, title: const Text('मेरे ऑर्डर • My Orders', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17))),
       body: Padding(
         padding: const EdgeInsets.all(14),
         child: Column(
@@ -1023,7 +1053,7 @@ class _OrdersTabViewState extends State {
                   child: TextField(
                     controller: _phoneCtrl,
                     keyboardType: TextInputType.phone,
-                    decoration: const InputDecoration(hintText: 'Mobile Number dalein', filled: true, fillColor: Colors.white, border: OutlineInputBorder(), isDense: true),
+                    decoration: const InputDecoration(hintText: 'मोबाइल नंबर डालें (Mobile Number)', filled: true, fillColor: Colors.white, border: OutlineInputBorder(), isDense: true),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -1039,7 +1069,7 @@ class _OrdersTabViewState extends State {
               child: _loading
                   ? const Center(child: CircularProgressIndicator())
                   : _orders.isEmpty
-                      ? const Center(child: Text('Koi order nahi mila.'))
+                      ? const Center(child: Text('कोई ऑर्डर नहीं मिला • No orders found'))
                       : ListView.builder(
                           itemCount: _orders.length,
                           itemBuilder: (_, i) {
