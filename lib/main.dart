@@ -3,8 +3,6 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'delivery_boys_screen.dart';
-import 'service_pincodes_screen.dart';
 
 const String kOwnerRecoveryKey = 'Deua199800';
 const Duration kIdleLogoutDuration = Duration(minutes: 30);
@@ -2082,6 +2080,229 @@ class _OwnerDashboardScreenState extends State with WidgetsBindingObserver {
           ],
         ),
       ),
+    );
+  }
+}
+
+class DeliveryBoysScreen extends StatefulWidget {
+  final String actorRole;
+  const DeliveryBoysScreen({super.key, this.actorRole = 'owner'});
+
+  @override
+  State createState() => _DeliveryBoysScreenState();
+}
+
+class _DeliveryBoysScreenState extends State {
+  final _supabase = Supabase.instance.client;
+  List _boys = [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadBoys();
+  }
+
+  Future _loadBoys() async {
+    setState(() => _loading = true);
+    try {
+      final res = await _supabase
+          .from('deua_staff_accounts')
+          .select()
+          .eq('role', 'delivery_boy');
+      if (mounted) {
+        setState(() {
+          _boys = List.from(res as List);
+        });
+      }
+    } catch (_) {
+      try {
+        final res = await _supabase.from('deua_delivery_boys').select();
+        if (mounted) {
+          setState(() {
+            _boys = List.from(res as List);
+          });
+        }
+      } catch (_) {}
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF1B7A2B),
+        foregroundColor: Colors.white,
+        title: const Text('डिलीवरी बॉय • Delivery Boys'),
+        actions: [
+          IconButton(onPressed: _loadBoys, icon: const Icon(Icons.refresh)),
+        ],
+      ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator(color: Color(0xFF1B7A2B)))
+          : _boys.isEmpty
+              ? const Center(child: Text('अभी कोई Delivery Boy नहीं मिला है।'))
+              : ListView.builder(
+                  padding: const EdgeInsets.all(12),
+                  itemCount: _boys.length,
+                  itemBuilder: (_, i) {
+                    final b = Map.from(_boys[i] as Map);
+                    final name = (b['name'] ?? 'Delivery Boy').toString();
+                    final phone = (b['phone'] ?? b['email'] ?? '').toString();
+                    final active = b['is_active'] != false;
+                    return Card(
+                      color: Colors.white,
+                      margin: const EdgeInsets.only(bottom: 8),
+                      child: ListTile(
+                        leading: const CircleAvatar(
+                          backgroundColor: Color(0xFFE8F5E9),
+                          child: Icon(Icons.delivery_dining, color: Color(0xFF1B7A2B)),
+                        ),
+                        title: Text(name, style: const TextStyle(fontWeight: FontWeight.bold)),
+                        subtitle: Text(phone),
+                        trailing: Text(
+                          active ? 'Active' : 'Inactive',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: active ? const Color(0xFF1B7A2B) : Colors.red,
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+    );
+  }
+}
+
+class ServicePincodesScreen extends StatefulWidget {
+  final String actorRole;
+  const ServicePincodesScreen({super.key, this.actorRole = 'owner'});
+
+  @override
+  State createState() => _ServicePincodesScreenState();
+}
+
+class _ServicePincodesScreenState extends State {
+  final _supabase = Supabase.instance.client;
+  List _pins = [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPins();
+  }
+
+  Future _loadPins() async {
+    setState(() => _loading = true);
+    try {
+      final res = await _supabase.from('deua_service_pincodes').select();
+      if (mounted) {
+        setState(() {
+          _pins = List.from(res as List);
+        });
+      }
+    } catch (_) {}
+    if (mounted) setState(() => _loading = false);
+  }
+
+  Future _addPinDialog() async {
+    final pinCtrl = TextEditingController();
+    final areaCtrl = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Add Delivery PIN'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: pinCtrl,
+              keyboardType: TextInputType.number,
+              maxLength: 6,
+              decoration: const InputDecoration(labelText: 'PIN Code'),
+            ),
+            TextField(
+              controller: areaCtrl,
+              decoration: const InputDecoration(labelText: 'Area Name'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Save')),
+        ],
+      ),
+    );
+    if (ok == true && pinCtrl.text.trim().isNotEmpty) {
+      try {
+        await _supabase.from('deua_service_pincodes').insert({
+          'pincode': pinCtrl.text.trim(),
+          'area_name': areaCtrl.text.trim(),
+          'is_active': true,
+        });
+        await _loadPins();
+      } catch (_) {}
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF1B7A2B),
+        foregroundColor: Colors.white,
+        title: const Text('डिलीवरी पिन कोड • Pin Codes'),
+        actions: [
+          IconButton(onPressed: _loadPins, icon: const Icon(Icons.refresh)),
+        ],
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        backgroundColor: const Color(0xFF1B7A2B),
+        foregroundColor: Colors.white,
+        onPressed: _addPinDialog,
+        icon: const Icon(Icons.add),
+        label: const Text('Add PIN'),
+      ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator(color: Color(0xFF1B7A2B)))
+          : _pins.isEmpty
+              ? const Center(child: Text('अभी कोई Pin Code नहीं जुड़ा है।'))
+              : ListView.builder(
+                  padding: const EdgeInsets.fromLTRB(12, 12, 12, 80),
+                  itemCount: _pins.length,
+                  itemBuilder: (_, i) {
+                    final item = Map.from(_pins[i] as Map);
+                    final active = item['is_active'] != false;
+                    return Card(
+                      color: Colors.white,
+                      margin: const EdgeInsets.only(bottom: 8),
+                      child: ListTile(
+                        title: Text(
+                          '${item['pincode'] ?? ''} - ${item['area_name'] ?? ''}',
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        subtitle: Text(active ? 'ACTIVE' : 'INACTIVE'),
+                        trailing: Switch(
+                          value: active,
+                          activeColor: const Color(0xFF1B7A2B),
+                          onChanged: (val) async {
+                            try {
+                              await _supabase
+                                  .from('deua_service_pincodes')
+                                  .update({'is_active': val})
+                                  .eq('id', item['id']);
+                              await _loadPins();
+                            } catch (_) {}
+                          },
+                        ),
+                      ),
+                    );
+                  },
+                ),
     );
   }
 }
