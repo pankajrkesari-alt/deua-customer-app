@@ -11,7 +11,9 @@ const String kSupabaseAnonKey =
 // Future-ready settings (yahan se kabhi bhi badal sakte hain)
 const double kDeliveryCharge = 0; // Abhi FREE hai; aage 15 ya 20 kar sakte hain
 const double kFreeDeliveryMinOrder = 0; // Jaise 199 se upar FREE rakhna ho
-const String kSupportPhone = '+91 9971243941'; // Apna WhatsApp/Call number dalein
+const String kSupportPhone = '+91 99999 99999'; // Apna WhatsApp/Call number dalein
+const String kUpiId = 'pankajram3507@pnb';
+const String kUpiName = 'PANKAJ RAM';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -729,15 +731,11 @@ class _CustomerShellScreenState extends State {
                           child: ListTile(
                             leading: ClipRRect(
                               borderRadius: BorderRadius.circular(8),
-                              child: Container(
+                              child: _netImage(
+                                prod['image_url']?.toString(),
                                 width: 48,
                                 height: 48,
-                                color: const Color(0xFFF4F6F4),
-                                padding: const EdgeInsets.all(3),
-                                child: _netImage(
-                                  prod['image_url']?.toString(),
-                                  fit: BoxFit.contain,
-                                ),
+                                fit: BoxFit.cover,
                               ),
                             ),
                             title: Text(
@@ -845,13 +843,9 @@ class _CustomerShellScreenState extends State {
             child: Stack(
               fit: StackFit.expand,
               children: [
-                Container(
-                  color: const Color(0xFFF4F6F4),
-                  padding: const EdgeInsets.all(6),
-                  child: _netImage(
-                    prod['image_url']?.toString(),
-                    fit: BoxFit.contain,
-                  ),
+                _netImage(
+                  prod['image_url']?.toString(),
+                  fit: BoxFit.cover,
                 ),
                 if (disc > 0)
                   Positioned(
@@ -914,7 +908,6 @@ class _CustomerShellScreenState extends State {
                     decoration: BoxDecoration(
                       color: Colors.white.withValues(alpha: 0.94),
                       borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.grey.shade200),
                     ),
                     child: Text(
                       (activePack['label'] ?? '').toString(),
@@ -1083,6 +1076,173 @@ class _CustomerShellScreenState extends State {
                   ),
               ],
             ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildUpiQrCard() {
+    final amountStr = _grandTotal.toStringAsFixed(2);
+    final upiUri =
+        'upi://pay?pa=$kUpiId&pn=${Uri.encodeComponent(kUpiName)}&am=$amountStr&cu=INR&tn=${Uri.encodeComponent('DEUA FRESH Order')}';
+    final qrUrl =
+        'https://api.qrserver.com/v1/create-qr-code/?size=280x280&ecc=H&margin=8&data=${Uri.encodeComponent(upiUri)}';
+
+    return Container(
+      margin: const EdgeInsets.only(top: 10),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF3FBF4),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFA5D6A7)),
+      ),
+      child: Column(
+        children: [
+          Text(
+            'Scan & Pay ₹${_grandTotal.toStringAsFixed(0)}',
+            style: const TextStyle(
+              fontSize: 15.5,
+              fontWeight: FontWeight.w900,
+              color: Color(0xFF1B7A2B),
+            ),
+          ),
+          const Text(
+            'PhonePe, Google Pay या Paytm से स्कैन करें',
+            style: TextStyle(fontSize: 11.5, color: Colors.black54),
+          ),
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(14),
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0x14000000),
+                  blurRadius: 6,
+                  offset: Offset(0, 2),
+                ),
+              ],
+            ),
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                Image.network(
+                  qrUrl,
+                  width: 196,
+                  height: 196,
+                  fit: BoxFit.contain,
+                  loadingBuilder: (_, child, progress) {
+                    if (progress == null) return child;
+                    return const SizedBox(
+                      width: 196,
+                      height: 196,
+                      child: Center(
+                        child: CircularProgressIndicator(
+                          color: Color(0xFF1B7A2B),
+                        ),
+                      ),
+                    );
+                  },
+                  errorBuilder: (_, __, ___) => const SizedBox(
+                    width: 196,
+                    height: 196,
+                    child: Center(
+                      child: Text(
+                        'QR load nahi hua.\nNeeche UPI ID copy karein.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(fontSize: 12, color: Colors.black54),
+                      ),
+                    ),
+                  ),
+                ),
+                // Center DF Brand Badge
+                Container(
+                  width: 38,
+                  height: 38,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF1B7A2B),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.white, width: 3),
+                    boxShadow: const [
+                      BoxShadow(
+                        color: Color(0x28000000),
+                        blurRadius: 4,
+                      ),
+                    ],
+                  ),
+                  alignment: Alignment.center,
+                  child: const Text(
+                    'DF',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w900,
+                      fontSize: 14,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: Colors.grey.shade300),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(
+                  Icons.account_balance_wallet_outlined,
+                  size: 16,
+                  color: Color(0xFF1B7A2B),
+                ),
+                const SizedBox(width: 6),
+                const Text(
+                  kUpiId,
+                  style: TextStyle(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 13,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                InkWell(
+                  onTap: () {
+                    Clipboard.setData(const ClipboardData(text: kUpiId));
+                    _toast('UPI ID copied • यूपीआई आईडी कॉपी हो गई');
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 3,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFE8F5E9),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: const Text(
+                      'Copy',
+                      style: TextStyle(
+                        color: Color(0xFF1B7A2B),
+                        fontWeight: FontWeight.w800,
+                        fontSize: 11.5,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            '$kUpiName • Payment karne ke baad "Place Order" dabayein',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 11, color: Colors.black54),
           ),
         ],
       ),
@@ -2140,7 +2300,6 @@ class _CustomerShellScreenState extends State {
           ],
         ),
 
-        // Total Savings ("Aapki Bachat") banner
         if (_cartSavings > 0) ...[
           const SizedBox(height: 10),
           Container(
@@ -2175,7 +2334,6 @@ class _CustomerShellScreenState extends State {
 
         const SizedBox(height: 10),
 
-        // Cart Items with Real Photos
         ..._cart.entries.map((entry) {
           final key = entry.key.toString();
           final item = Map.from(entry.value as Map);
@@ -2195,15 +2353,11 @@ class _CustomerShellScreenState extends State {
                 children: [
                   ClipRRect(
                     borderRadius: BorderRadius.circular(10),
-                    child: Container(
+                    child: _netImage(
+                      item['image_url']?.toString(),
                       width: 56,
                       height: 56,
-                      color: const Color(0xFFF4F6F4),
-                      padding: const EdgeInsets.all(4),
-                      child: _netImage(
-                        item['image_url']?.toString(),
-                        fit: BoxFit.contain,
-                      ),
+                      fit: BoxFit.cover,
                     ),
                   ),
                   const SizedBox(width: 10),
@@ -2305,7 +2459,6 @@ class _CustomerShellScreenState extends State {
           );
         }),
 
-        // Bill Summary Card
         Card(
           color: Colors.white,
           margin: const EdgeInsets.only(top: 4, bottom: 10),
@@ -2376,7 +2529,6 @@ class _CustomerShellScreenState extends State {
           ),
         ),
 
-        // Delivery Details + Note/Landmark
         Card(
           color: Colors.white,
           shape: RoundedRectangleBorder(
@@ -2458,7 +2610,10 @@ class _CustomerShellScreenState extends State {
                       value: 'COD',
                       child: Text('Cash on Delivery (COD)'),
                     ),
-                    DropdownMenuItem(value: 'UPI', child: Text('UPI')),
+                    DropdownMenuItem(
+                      value: 'UPI',
+                      child: Text('UPI (QR Scan / Online)'),
+                    ),
                   ],
                   onChanged: (v) {
                     if (v != null) {
@@ -2466,6 +2621,7 @@ class _CustomerShellScreenState extends State {
                     }
                   },
                 ),
+                if (_checkoutPayment == 'UPI') _buildUpiQrCard(),
                 const SizedBox(height: 14),
                 SizedBox(
                   width: double.infinity,
@@ -2623,7 +2779,6 @@ class _CustomerShellScreenState extends State {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // Order ID + Date/Time + Total
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
@@ -2658,12 +2813,8 @@ class _CustomerShellScreenState extends State {
                           ],
                         ),
                         const SizedBox(height: 10),
-
-                        // 4-Step Status Progress Bar
                         _buildOrderStatusBar(status),
                         const Divider(height: 18),
-
-                        // Real Photo Items List
                         ...items.map((rawIt) {
                           final it = Map.from(rawIt as Map);
                           final qty = (it['qty'] as num?)?.toInt() ?? 1;
@@ -2674,15 +2825,11 @@ class _CustomerShellScreenState extends State {
                               children: [
                                 ClipRRect(
                                   borderRadius: BorderRadius.circular(8),
-                                  child: Container(
+                                  child: _netImage(
+                                    it['image_url']?.toString(),
                                     width: 42,
                                     height: 42,
-                                    color: const Color(0xFFF4F6F4),
-                                    padding: const EdgeInsets.all(3),
-                                    child: _netImage(
-                                      it['image_url']?.toString(),
-                                      fit: BoxFit.contain,
-                                    ),
+                                    fit: BoxFit.cover,
                                   ),
                                 ),
                                 const SizedBox(width: 8),
@@ -2721,10 +2868,7 @@ class _CustomerShellScreenState extends State {
                             ),
                           );
                         }),
-
                         const SizedBox(height: 8),
-
-                        // Action Buttons: Re-order, Help, Cancel (if Pending)
                         Row(
                           children: [
                             Expanded(
