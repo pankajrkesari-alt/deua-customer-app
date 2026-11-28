@@ -1,11 +1,17 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 const String kSupabaseUrl = 'https://cvbubouqkoladwhemzcf.supabase.co';
 const String kSupabaseAnonKey =
     'sb_publishable_gSYtFINdgJzEQwYLJ9M8pg_zxMs6SK5';
+
+// Future-ready settings (yahan se kabhi bhi badal sakte hain)
+const double kDeliveryCharge = 0; // Abhi FREE hai; aage 15 ya 20 kar sakte hain
+const double kFreeDeliveryMinOrder = 0; // Jaise 199 se upar FREE rakhna ho
+const String kSupportPhone = '+91 9971243941'; // Apna WhatsApp/Call number dalein
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -47,7 +53,7 @@ class CustomerShellScreen extends StatefulWidget {
 class _CustomerShellScreenState extends State {
   final _supabase = Supabase.instance.client;
 
-  int _tabIndex = 0; // 0: Home, 1: Categories, 2: Orders, 3: Profile
+  int _tabIndex = 0; // 0: Home, 1: Categories, 2: Cart, 3: Orders, 4: Profile
   bool _loading = true;
   String? _error;
 
@@ -71,6 +77,10 @@ class _CustomerShellScreenState extends State {
   final _profilePhoneCtrl = TextEditingController();
   final _profileAddrCtrl = TextEditingController();
   final _profilePinCtrl = TextEditingController();
+  final _deliveryNoteCtrl = TextEditingController();
+
+  String _checkoutPayment = 'COD';
+  bool _placingOrder = false;
 
   final Map _selectedPackIndex = {};
   final Map _cart = {};
@@ -96,6 +106,7 @@ class _CustomerShellScreenState extends State {
     _profilePhoneCtrl.dispose();
     _profileAddrCtrl.dispose();
     _profilePinCtrl.dispose();
+    _deliveryNoteCtrl.dispose();
     super.dispose();
   }
 
@@ -113,7 +124,9 @@ class _CustomerShellScreenState extends State {
 
     _profileNameCtrl.text = _customerName;
     _profilePhoneCtrl.text = _customerPhone;
-    _profileAddrCtrl.text = _customerAddress;
+    _profileAddrCtrl.text = _customerAddress.isNotEmpty
+        ? _customerAddress
+        : 'Deua Village, Bihar';
     _profilePinCtrl.text = _savedPincode;
 
     final savedFavs = prefs.getStringList('deua_favs') ?? [];
@@ -241,6 +254,7 @@ class _CustomerShellScreenState extends State {
     final key = '${pid}_$pIdx';
 
     final price = (pack['price'] as num?)?.toDouble() ?? 0;
+    final mrp = (pack['mrp'] as num?)?.toDouble() ?? price;
     final label = (pack['label'] ?? '1 pack').toString();
 
     setState(() {
@@ -254,12 +268,12 @@ class _CustomerShellScreenState extends State {
           'name': (prod['name'] ?? '').toString(),
           'pack': label,
           'price': price,
+          'mrp': mrp < price ? price : mrp,
           'image_url': (prod['image_url'] ?? '').toString(),
           'qty': 1,
         };
       }
     });
-    _toast('${prod['name']} ($label) added • कार्ट में जुड़ा');
   }
 
   void _reorderItems(Map ord) {
@@ -276,6 +290,7 @@ class _CustomerShellScreenState extends State {
         final key = 're_${pid}_$pack';
         final qty = (item['qty'] as num?)?.toInt() ?? 1;
         final price = (item['price'] as num?)?.toDouble() ?? 0;
+        final mrp = (item['mrp'] as num?)?.toDouble() ?? price;
         if (_cart.containsKey(key)) {
           final cur = Map.from(_cart[key] as Map);
           cur['qty'] = ((cur['qty'] as num?)?.toInt() ?? 1) + qty;
@@ -286,14 +301,15 @@ class _CustomerShellScreenState extends State {
             'name': (item['name'] ?? '').toString(),
             'pack': pack,
             'price': price,
+            'mrp': mrp < price ? price : mrp,
             'image_url': (item['image_url'] ?? '').toString(),
             'qty': qty,
           };
         }
       }
+      _tabIndex = 2; // Cart tab
     });
     _toast('Items cart mein add ho gaye • कार्ट में जुड़ गए');
-    _openCartAndCheckout();
   }
 
   void _changeCartQty(String key, int delta) {
@@ -321,6 +337,30 @@ class _CustomerShellScreenState extends State {
     return sum;
   }
 
+  double get _cartSavings {
+    double saved = 0;
+    for (final rawItem in _cart.values) {
+      final item = Map.from(rawItem as Map);
+      final p = (item['price'] as num?)?.toDouble() ?? 0;
+      final m = (item['mrp'] as num?)?.toDouble() ?? p;
+      final q = (item['qty'] as num?)?.toInt() ?? 1;
+      if (m > p) {
+        saved += (m - p) * q;
+      }
+    }
+    return saved;
+  }
+
+  double get _deliveryFee {
+    if (kDeliveryCharge <= 0) return 0;
+    if (kFreeDeliveryMinOrder > 0 && _cartTotal >= kFreeDeliveryMinOrder) {
+      return 0;
+    }
+    return kDeliveryCharge;
+  }
+
+  double get _grandTotal => _cartTotal + _deliveryFee;
+
   int get _cartCount {
     int cnt = 0;
     for (final rawItem in _cart.values) {
@@ -328,6 +368,51 @@ class _CustomerShellScreenState extends State {
       cnt += (item['qty'] as num?)?.toInt() ?? 1;
     }
     return cnt;
+  }
+
+  String _formatOrderId(dynamic rawId) {
+    final clean = (rawId ?? '').toString().replaceAll('-', '').toUpperCase();
+    if (clean.isEmpty) return '#DF-0000';
+    final part = clean.length >= 4
+        ? clean.substring(clean.length - 4)
+        : clean.padLeft(4, '0');
+    return '#DF-$part';
+  }
+
+  String _formatDateTime(dynamic rawDate) {
+    final s = (rawDate ?? '').toString().trim();
+    if (s.isEmpty) return '';
+    final dt = DateTime.tryParse(s)?.toLocal();
+    if (dt == null) return '';
+    const months = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
+    final m = months[dt.month - 1];
+    final hr12 = dt.hour % 12 == 0 ? 12 : dt.hour % 12;
+    final min = dt.minute.toString().padLeft(2, '0');
+    final ampm = dt.hour >= 12 ? 'PM' : 'AM';
+    return '${dt.day} $m, $hr12:$min $ampm';
+  }
+
+  int _statusStepIndex(String status) {
+    final s = status.toLowerCase();
+    if (s.contains('deliver')) return 3;
+    if (s.contains('out') || s.contains('way') || s.contains('ship')) return 2;
+    if (s.contains('pack') || s.contains('confirm') || s.contains('accept')) {
+      return 1;
+    }
+    return 0;
   }
 
   void _toast(String msg, {bool isError = false}) {
@@ -401,6 +486,185 @@ class _CustomerShellScreenState extends State {
     }
   }
 
+  Future _placeOrderFromCart() async {
+    if (_cart.isEmpty) {
+      _toast('Cart is empty • पहले सामान जोड़ें', isError: true);
+      return;
+    }
+    final nm = _profileNameCtrl.text.trim();
+    final ph = _profilePhoneCtrl.text.trim();
+    final ad = _profileAddrCtrl.text.trim();
+    final pn = _profilePinCtrl.text.trim();
+    final note = _deliveryNoteCtrl.text.trim();
+    if (nm.isEmpty || ph.length < 8 || ad.isEmpty) {
+      _toast('नाम, मोबाइल नंबर और पता ज़रूर भरें।', isError: true);
+      return;
+    }
+
+    String fullAddress = ad;
+    if (pn.isNotEmpty) {
+      fullAddress = '$fullAddress (PIN: $pn)';
+    }
+    if (note.isNotEmpty) {
+      fullAddress = '$fullAddress | Note: $note';
+    }
+
+    setState(() => _placingOrder = true);
+    try {
+      final itemsList = _cart.values.toList();
+      await _supabase.from('deua_orders').insert({
+        'customer_name': nm,
+        'customer_phone': ph,
+        'delivery_address': fullAddress,
+        'items': itemsList,
+        'total_amount': _grandTotal,
+        'payment_method': _checkoutPayment,
+        'status': 'Pending',
+      });
+
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('deua_cust_name', nm);
+      await prefs.setString('deua_cust_phone', ph);
+      await prefs.setString('deua_cust_addr', ad);
+      if (pn.isNotEmpty) {
+        await prefs.setString('deua_pincode', pn);
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _customerName = nm;
+        _customerPhone = ph;
+        _customerAddress = ad;
+        if (pn.isNotEmpty) _savedPincode = pn;
+        _cart.clear();
+        _deliveryNoteCtrl.clear();
+        _placingOrder = false;
+        _tabIndex = 3; // Orders tab
+      });
+      await _loadPrefsAndData();
+      _toast('Order placed! • ऑर्डर सफलतापूर्वक दर्ज हो गया');
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _placingOrder = false);
+      _toast('Order error: $e', isError: true);
+    }
+  }
+
+  Future _confirmCancelOrder(Map ord) async {
+    final orderId = _formatOrderId(ord['id']);
+    final ok = await showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Cancel Order $orderId?'),
+        content: const Text(
+          'Kya aap yeh order cancel karna chahte hain?\nक्या आप यह ऑर्डर रद्द करना चाहते हैं?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('No • नहीं'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red.shade700,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Yes, Cancel • रद्द करें'),
+          ),
+        ],
+      ),
+    );
+
+    if (ok != true) return;
+    try {
+      await _supabase
+          .from('deua_orders')
+          .update({'status': 'Cancelled'})
+          .eq('id', ord['id']);
+      await _loadPrefsAndData();
+      _toast('Order $orderId cancelled • ऑर्डर रद्द हो गया');
+    } catch (e) {
+      _toast('Cancel error: $e', isError: true);
+    }
+  }
+
+  Future _openHelpDialog(Map ord) async {
+    final orderId = _formatOrderId(ord['id']);
+    final helpMsg =
+        'Hello DEUA FRESH, mujhe Order $orderId (₹${ord['total_amount'] ?? 0}) mein madad chahiye.';
+
+    await showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.support_agent, color: Color(0xFF1B7A2B)),
+            SizedBox(width: 8),
+            Text('Order Help • मदद'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Order ID: $orderId',
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'WhatsApp / Call Support:',
+              style: TextStyle(fontSize: 12, color: Colors.black54),
+            ),
+            Text(
+              kSupportPhone,
+              style: const TextStyle(
+                fontSize: 17,
+                fontWeight: FontWeight.w900,
+                color: Color(0xFF1B7A2B),
+              ),
+            ),
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF4F6F4),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                helpMsg,
+                style: const TextStyle(fontSize: 12.5),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Clipboard.setData(const ClipboardData(text: kSupportPhone));
+              Navigator.pop(ctx);
+              _toast('Support number copied • नंबर कॉपी हो गया');
+            },
+            child: const Text('Copy Number'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF1B7A2B),
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: helpMsg));
+              Navigator.pop(ctx);
+              _toast('WhatsApp message copied • मैसेज कॉपी हो गया');
+            },
+            child: const Text('Copy Message'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future _openWishlistSheet() async {
     final favProds = _products
         .map((p) => Map.from(p as Map))
@@ -465,10 +729,15 @@ class _CustomerShellScreenState extends State {
                           child: ListTile(
                             leading: ClipRRect(
                               borderRadius: BorderRadius.circular(8),
-                              child: _netImage(
-                                prod['image_url']?.toString(),
+                              child: Container(
                                 width: 48,
                                 height: 48,
+                                color: const Color(0xFFF4F6F4),
+                                padding: const EdgeInsets.all(3),
+                                child: _netImage(
+                                  prod['image_url']?.toString(),
+                                  fit: BoxFit.contain,
+                                ),
                               ),
                             ),
                             title: Text(
@@ -493,6 +762,7 @@ class _CustomerShellScreenState extends State {
                               ),
                               onPressed: () {
                                 _addToCart(prod);
+                                _toast('Added to cart • कार्ट में जुड़ा');
                               },
                               child: const Text('Add'),
                             ),
@@ -507,282 +777,31 @@ class _CustomerShellScreenState extends State {
     );
   }
 
-  Future _openCartAndCheckout() async {
-    if (_cart.isEmpty) {
-      _toast('Cart is empty • पहले सामान जोड़ें', isError: true);
-      return;
-    }
-
-    final nameCtrl = TextEditingController(text: _customerName);
-    final phoneCtrl = TextEditingController(text: _customerPhone);
-    final addrCtrl = TextEditingController(
-      text: _customerAddress.isNotEmpty
-          ? _customerAddress
-          : 'Deua Village, Bihar',
-    );
-    final pinCtrl = TextEditingController(text: _savedPincode);
-    String paymentMethod = 'COD';
-    bool placing = false;
-
-    await showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      builder: (ctx) => StatefulBuilder(
-        builder: (mCtx, setModal) => Padding(
-          padding: EdgeInsets.fromLTRB(
-            16,
-            16,
-            16,
-            MediaQuery.of(mCtx).viewInsets.bottom + 16,
-          ),
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Cart ($_cartCount) • Checkout',
-                          style: const TextStyle(
-                            fontSize: 17,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const Text(
-                          'कार्ट और ऑर्डर कन्फर्म करें',
-                          style: TextStyle(fontSize: 11.5, color: Colors.black54),
-                        ),
-                      ],
-                    ),
-                    Text(
-                      '₹${_cartTotal.toStringAsFixed(0)}',
-                      style: const TextStyle(
-                        fontSize: 17,
-                        fontWeight: FontWeight.w900,
-                        color: Color(0xFF1B7A2B),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                ..._cart.entries.map((entry) {
-                  final key = entry.key.toString();
-                  final item = Map.from(entry.value as Map);
-                  final qty = (item['qty'] as num?)?.toInt() ?? 1;
-                  final price = (item['price'] as num?)?.toDouble() ?? 0;
-                  return Card(
-                    color: const Color(0xFFF9FBF9),
-                    margin: const EdgeInsets.only(bottom: 6),
-                    child: ListTile(
-                      dense: true,
-                      title: Text(
-                        '${item['name']} (${item['pack']})',
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 13,
-                        ),
-                      ),
-                      subtitle: Text('₹${(price * qty).toStringAsFixed(0)}'),
-                      trailing: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          IconButton(
-                            icon: const Icon(
-                              Icons.remove_circle_outline,
-                              size: 20,
-                            ),
-                            onPressed: () {
-                              _changeCartQty(key, -1);
-                              setModal(() {});
-                              if (_cart.isEmpty) Navigator.pop(ctx);
-                            },
-                          ),
-                          Text(
-                            '$qty',
-                            style: const TextStyle(fontWeight: FontWeight.bold),
-                          ),
-                          IconButton(
-                            icon: const Icon(
-                              Icons.add_circle_outline,
-                              size: 20,
-                              color: Color(0xFF1B7A2B),
-                            ),
-                            onPressed: () {
-                              _changeCartQty(key, 1);
-                              setModal(() {});
-                            },
-                          ),
-                        ],
-                      ),
-                    ),
-                  );
-                }),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: nameCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Name • आपका नाम',
-                    border: OutlineInputBorder(),
-                    isDense: true,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: phoneCtrl,
-                  keyboardType: TextInputType.phone,
-                  decoration: const InputDecoration(
-                    labelText: 'Phone • मोबाइल नंबर',
-                    border: OutlineInputBorder(),
-                    isDense: true,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: pinCtrl,
-                  keyboardType: TextInputType.number,
-                  maxLength: 6,
-                  decoration: const InputDecoration(
-                    labelText: 'PIN Code • पिन कोड',
-                    border: OutlineInputBorder(),
-                    isDense: true,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: addrCtrl,
-                  maxLines: 2,
-                  decoration: const InputDecoration(
-                    labelText: 'Delivery Address • पूरा पता',
-                    border: OutlineInputBorder(),
-                    isDense: true,
-                  ),
-                ),
-                const SizedBox(height: 10),
-                DropdownButtonFormField(
-                  value: paymentMethod,
-                  decoration: const InputDecoration(
-                    labelText: 'Payment Method • भुगतान का तरीका',
-                    border: OutlineInputBorder(),
-                    isDense: true,
-                  ),
-                  items: const [
-                    DropdownMenuItem(
-                      value: 'COD',
-                      child: Text('Cash on Delivery (COD)'),
-                    ),
-                    DropdownMenuItem(value: 'UPI', child: Text('UPI')),
-                  ],
-                  onChanged: (v) {
-                    if (v != null) setModal(() => paymentMethod = v.toString());
-                  },
-                ),
-                const SizedBox(height: 12),
-                SizedBox(
-                  width: double.infinity,
-                  height: 48,
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF1B7A2B),
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    onPressed: placing
-                        ? null
-                        : () async {
-                            final nm = nameCtrl.text.trim();
-                            final ph = phoneCtrl.text.trim();
-                            final ad = addrCtrl.text.trim();
-                            final pn = pinCtrl.text.trim();
-                            if (nm.isEmpty || ph.length < 8 || ad.isEmpty) {
-                              _toast(
-                                'नाम, मोबाइल नंबर और पता ज़रूर भरें।',
-                                isError: true,
-                              );
-                              return;
-                            }
-                            setModal(() => placing = true);
-                            try {
-                              final itemsList = _cart.values.toList();
-                              await _supabase.from('deua_orders').insert({
-                                'customer_name': nm,
-                                'customer_phone': ph,
-                                'delivery_address':
-                                    pn.isNotEmpty ? '$ad (PIN: $pn)' : ad,
-                                'items': itemsList,
-                                'total_amount': _cartTotal,
-                                'payment_method': paymentMethod,
-                                'status': 'Pending',
-                              });
-
-                              final prefs =
-                                  await SharedPreferences.getInstance();
-                              await prefs.setString('deua_cust_name', nm);
-                              await prefs.setString('deua_cust_phone', ph);
-                              await prefs.setString('deua_cust_addr', ad);
-                              if (pn.isNotEmpty) {
-                                await prefs.setString('deua_pincode', pn);
-                              }
-
-                              if (!mounted) return;
-                              setState(() {
-                                _customerName = nm;
-                                _customerPhone = ph;
-                                _customerAddress = ad;
-                                if (pn.isNotEmpty) _savedPincode = pn;
-                                _cart.clear();
-                                _tabIndex = 2;
-                              });
-                              Navigator.pop(ctx);
-                              await _loadPrefsAndData();
-                              _toast('Order placed! • ऑर्डर सफलतापूर्वक दर्ज हो गया');
-                            } catch (e) {
-                              setModal(() => placing = false);
-                              _toast('Order error: $e', isError: true);
-                            }
-                          },
-                    child: Text(
-                      placing
-                          ? 'Placing Order... • ऑर्डर भेजा जा रहा है'
-                          : 'Place Order (₹${_cartTotal.toStringAsFixed(0)}) • ऑर्डर करें',
-                      style: const TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _netImage(String? url, {double? width, double? height}) {
+  Widget _netImage(
+    String? url, {
+    double? width,
+    double? height,
+    BoxFit fit = BoxFit.cover,
+  }) {
     final clean = (url ?? '').trim();
     if (clean.isEmpty) {
       return Container(
         width: width,
         height: height,
         color: const Color(0xFFE8F5E9),
-        child: const Icon(Icons.eco, color: Color(0xFF1B7A2B), size: 28),
+        child: const Icon(Icons.eco, color: Color(0xFF1B7A2B), size: 26),
       );
     }
     return Image.network(
       clean,
       width: width,
       height: height,
-      fit: BoxFit.cover,
+      fit: fit,
       errorBuilder: (_, __, ___) => Container(
         width: width,
         height: height,
         color: const Color(0xFFE8F5E9),
-        child: const Icon(Icons.eco, color: Color(0xFF1B7A2B), size: 28),
+        child: const Icon(Icons.eco, color: Color(0xFF1B7A2B), size: 26),
       ),
     );
   }
@@ -799,6 +818,11 @@ class _CustomerShellScreenState extends State {
     final disc = (prod['discount_percent'] as num?)?.toInt() ?? 0;
     final inStock = prod['in_stock'] != false;
     final isFav = _favorites.contains(pid);
+
+    final cartKey = '${pid}_$pIdx';
+    final int inCartQty = _cart.containsKey(cartKey)
+        ? ((Map.from(_cart[cartKey] as Map)['qty'] as num?)?.toInt() ?? 0)
+        : 0;
 
     return Container(
       decoration: BoxDecoration(
@@ -821,7 +845,14 @@ class _CustomerShellScreenState extends State {
             child: Stack(
               fit: StackFit.expand,
               children: [
-                _netImage(prod['image_url']?.toString()),
+                Container(
+                  color: const Color(0xFFF4F6F4),
+                  padding: const EdgeInsets.all(6),
+                  child: _netImage(
+                    prod['image_url']?.toString(),
+                    fit: BoxFit.contain,
+                  ),
+                ),
                 if (disc > 0)
                   Positioned(
                     top: 8,
@@ -883,6 +914,7 @@ class _CustomerShellScreenState extends State {
                     decoration: BoxDecoration(
                       color: Colors.white.withValues(alpha: 0.94),
                       borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.grey.shade200),
                     ),
                     child: Text(
                       (activePack['label'] ?? '').toString(),
@@ -978,31 +1010,77 @@ class _CustomerShellScreenState extends State {
                   ],
                 ),
                 const SizedBox(height: 7),
-                SizedBox(
-                  width: double.infinity,
-                  height: 33,
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: inStock
-                          ? const Color(0xFF1B7A2B)
-                          : Colors.grey.shade400,
-                      foregroundColor: Colors.white,
-                      elevation: 0,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      padding: EdgeInsets.zero,
+                if (inCartQty > 0)
+                  Container(
+                    height: 33,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF1B7A2B),
+                      borderRadius: BorderRadius.circular(10),
                     ),
-                    onPressed: inStock ? () => _addToCart(prod) : null,
-                    child: Text(
-                      inStock ? 'Add • जोड़ें' : 'Out of Stock',
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 12,
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        InkWell(
+                          onTap: () => _changeCartQty(cartKey, -1),
+                          child: const SizedBox(
+                            width: 34,
+                            height: 33,
+                            child: Icon(
+                              Icons.remove,
+                              color: Colors.white,
+                              size: 18,
+                            ),
+                          ),
+                        ),
+                        Text(
+                          '$inCartQty',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w900,
+                            fontSize: 13.5,
+                          ),
+                        ),
+                        InkWell(
+                          onTap: () => _changeCartQty(cartKey, 1),
+                          child: const SizedBox(
+                            width: 34,
+                            height: 33,
+                            child: Icon(
+                              Icons.add,
+                              color: Colors.white,
+                              size: 18,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                else
+                  SizedBox(
+                    width: double.infinity,
+                    height: 33,
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: inStock
+                            ? const Color(0xFF1B7A2B)
+                            : Colors.grey.shade400,
+                        foregroundColor: Colors.white,
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        padding: EdgeInsets.zero,
+                      ),
+                      onPressed: inStock ? () => _addToCart(prod) : null,
+                      child: Text(
+                        inStock ? 'Add • जोड़ें' : 'Out of Stock',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 12,
+                        ),
                       ),
                     ),
                   ),
-                ),
               ],
             ),
           ),
@@ -1035,7 +1113,8 @@ class _CustomerShellScreenState extends State {
           'tagline': (m['tagline'] ?? 'Super Saver Deals Are Live!').toString(),
           'highlight': (m['highlight'] ?? '20% OFF').toString(),
           'subtitle': (m['subtitle'] ?? 'on fruits & veggies.').toString(),
-          'hindi_subtitle': (m['hindi_subtitle'] ?? 'ताज़े फल और सब्ज़ियां').toString(),
+          'hindi_subtitle':
+              (m['hindi_subtitle'] ?? 'ताज़े फल और सब्ज़ियां').toString(),
           'delivery_badge': (m['delivery_badge'] ?? '30 MINUTES!').toString(),
           'cta_text': (m['cta_text'] ?? 'ORDER NOW').toString(),
           'cta_hindi': (m['cta_hindi'] ?? 'अभी ऑर्डर करें').toString(),
@@ -1092,193 +1171,189 @@ class _CustomerShellScreenState extends State {
           ),
         ],
       ),
-      child: Stack(
+      child: Row(
         children: [
-          Row(
-            children: [
-              Expanded(
-                flex: 6,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment: MainAxisAlignment.center,
+          Expanded(
+            flex: 6,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  b['tagline'].toString(),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Color(0xFFE8F5E9),
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(height: 5),
+                Wrap(
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: 5,
+                  runSpacing: 2,
                   children: [
-                    Text(
-                      b['tagline'].toString(),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Color(0xFFE8F5E9),
-                        fontSize: 11.5,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                    const SizedBox(height: 5),
-                    Wrap(
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      spacing: 5,
-                      runSpacing: 2,
-                      children: [
-                        const Text(
-                          'Up to',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 17,
-                            fontWeight: FontWeight.w900,
-                          ),
-                        ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 6,
-                            vertical: 2,
-                          ),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFFFD54F),
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: Text(
-                            b['highlight'].toString(),
-                            style: const TextStyle(
-                              color: Colors.black,
-                              fontSize: 15,
-                              fontWeight: FontWeight.w900,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      b['subtitle'].toString(),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
+                    const Text(
+                      'Up to',
+                      style: TextStyle(
                         color: Colors.white,
-                        fontSize: 15.5,
-                        fontWeight: FontWeight.w800,
+                        fontSize: 17,
+                        fontWeight: FontWeight.w900,
                       ),
                     ),
-                    Text(
-                      b['hindi_subtitle'].toString(),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFFD54F),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        b['highlight'].toString(),
+                        style: const TextStyle(
+                          color: Colors.black,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  b['subtitle'].toString(),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 15.5,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                Text(
+                  b['hindi_subtitle'].toString(),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Color(0xFFDCEDC8),
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Row(
+                  children: [
+                    const Text(
+                      'DELIVERED IN ',
+                      style: TextStyle(
+                        color: Colors.black87,
+                        fontSize: 9.5,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 5,
+                        vertical: 1.5,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFFD54F),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        b['delivery_badge'].toString(),
+                        style: const TextStyle(
+                          color: Colors.black,
+                          fontSize: 9.5,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                InkWell(
+                  onTap: () => setState(() {
+                    _selectedCatId = 'all';
+                    _selectedSubCatId = 'all';
+                    _tabIndex = 1;
+                  }),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 5,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFFD54F),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      '${b['cta_text']} • ${b['cta_hindi']}',
                       style: const TextStyle(
-                        color: Color(0xFFDCEDC8),
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
+                        color: Colors.black,
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w900,
                       ),
                     ),
-                    const SizedBox(height: 6),
-                    Row(
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            flex: 4,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                Align(
+                  alignment: Alignment.topRight,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 5,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Column(
                       children: [
                         const Text(
-                          'DELIVERED IN ',
+                          'DISCOUNT',
                           style: TextStyle(
-                            color: Colors.black87,
-                            fontSize: 9.5,
-                            fontWeight: FontWeight.w900,
+                            fontSize: 7.5,
+                            fontWeight: FontWeight.w800,
+                            color: Colors.black54,
                           ),
                         ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 5,
-                            vertical: 1.5,
-                          ),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFFFD54F),
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: Text(
-                            b['delivery_badge'].toString(),
-                            style: const TextStyle(
-                              color: Colors.black,
-                              fontSize: 9.5,
-                              fontWeight: FontWeight.w900,
-                            ),
+                        Text(
+                          b['badge_text'].toString(),
+                          style: const TextStyle(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w900,
+                            color: Color(0xFF1B7A2B),
                           ),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 8),
-                    InkWell(
-                      onTap: () => setState(() {
-                        _selectedCatId = 'all';
-                        _selectedSubCatId = 'all';
-                        _tabIndex = 1;
-                      }),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 5,
-                        ),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFFFD54F),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Text(
-                          '${b['cta_text']} • ${b['cta_hindi']}',
-                          style: const TextStyle(
-                            color: Colors.black,
-                            fontSize: 10.5,
-                            fontWeight: FontWeight.w900,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                flex: 4,
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    Align(
-                      alignment: Alignment.topRight,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 5,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: Column(
-                          children: [
-                            const Text(
-                              'DISCOUNT',
-                              style: TextStyle(
-                                fontSize: 7.5,
-                                fontWeight: FontWeight.w800,
-                                color: Colors.black54,
-                              ),
-                            ),
-                            Text(
-                              b['badge_text'].toString(),
-                              style: const TextStyle(
-                                fontSize: 11.5,
-                                fontWeight: FontWeight.w900,
-                                color: Color(0xFF1B7A2B),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    const Spacer(),
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(12),
-                      child: _netImage(
-                        b['image_url']?.toString(),
-                        width: 96,
-                        height: 88,
-                      ),
-                    ),
-                  ],
+                const Spacer(),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: _netImage(
+                    b['image_url']?.toString(),
+                    width: 96,
+                    height: 88,
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ],
       ),
@@ -1299,7 +1374,6 @@ class _CustomerShellScreenState extends State {
       child: ListView(
         padding: EdgeInsets.zero,
         children: [
-          // Top Green Header (Home + Location + Wishlist + Search Bar)
           Container(
             padding: const EdgeInsets.fromLTRB(14, 12, 14, 16),
             decoration: const BoxDecoration(
@@ -1431,7 +1505,6 @@ class _CustomerShellScreenState extends State {
 
           const SizedBox(height: 14),
 
-          // Dynamic Offer Banner Carousel
           SizedBox(
             height: 174,
             child: PageView.builder(
@@ -1461,7 +1534,6 @@ class _CustomerShellScreenState extends State {
             ),
           ),
 
-          // Shop by Category (3-column grid, bold English top + small Hindi bottom)
           Padding(
             padding: const EdgeInsets.fromLTRB(14, 14, 14, 8),
             child: Row(
@@ -1579,7 +1651,6 @@ class _CustomerShellScreenState extends State {
             },
           ),
 
-          // Today's Hot Deals / Popular Items
           Padding(
             padding: const EdgeInsets.fromLTRB(14, 16, 14, 8),
             child: Row(
@@ -1678,7 +1749,6 @@ class _CustomerShellScreenState extends State {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Clean Top Bar: Back Button + Selected Category (Bold Eng + Small Hindi) + Search Icon
         Container(
           width: double.infinity,
           color: Colors.white,
@@ -1774,8 +1844,6 @@ class _CustomerShellScreenState extends State {
           ),
         ),
         const Divider(height: 1),
-
-        // Left Sidebar (All Main Categories) + Right 2-Column Product Grid
         Expanded(
           child: Row(
             children: [
@@ -1994,6 +2062,527 @@ class _CustomerShellScreenState extends State {
     );
   }
 
+  Widget _buildCartTab() {
+    if (_cart.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(
+                Icons.shopping_cart_outlined,
+                size: 64,
+                color: Color(0xFF1B7A2B),
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'Your Cart is Empty',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(height: 4),
+              const Text(
+                'आपका कार्ट खाली है, खरीदारी शुरू करें',
+                style: TextStyle(fontSize: 13, color: Colors.black54),
+              ),
+              const SizedBox(height: 16),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF1B7A2B),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 24,
+                    vertical: 12,
+                  ),
+                ),
+                onPressed: () => setState(() => _tabIndex = 1),
+                child: const Text(
+                  'Shop Now • अभी खरीदें',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return ListView(
+      padding: const EdgeInsets.all(14),
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'My Cart ($_cartCount items)',
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const Text(
+                  'आपका कार्ट और कुल बिल',
+                  style: TextStyle(fontSize: 11.5, color: Colors.black54),
+                ),
+              ],
+            ),
+            Text(
+              'कुल ₹${_grandTotal.toStringAsFixed(0)}',
+              style: const TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w900,
+                color: Color(0xFF1B7A2B),
+              ),
+            ),
+          ],
+        ),
+
+        // Total Savings ("Aapki Bachat") banner
+        if (_cartSavings > 0) ...[
+          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+            decoration: BoxDecoration(
+              color: const Color(0xFFE8F5E9),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: const Color(0xFFA5D6A7)),
+            ),
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.savings_outlined,
+                  color: Color(0xFF1B7A2B),
+                  size: 20,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Aapki Bachat: ₹${_cartSavings.toStringAsFixed(0)} • आपने ₹${_cartSavings.toStringAsFixed(0)} बचाए!',
+                    style: const TextStyle(
+                      color: Color(0xFF1B7A2B),
+                      fontWeight: FontWeight.w800,
+                      fontSize: 12.5,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+
+        const SizedBox(height: 10),
+
+        // Cart Items with Real Photos
+        ..._cart.entries.map((entry) {
+          final key = entry.key.toString();
+          final item = Map.from(entry.value as Map);
+          final qty = (item['qty'] as num?)?.toInt() ?? 1;
+          final price = (item['price'] as num?)?.toDouble() ?? 0;
+          final mrp = (item['mrp'] as num?)?.toDouble() ?? price;
+
+          return Card(
+            color: Colors.white,
+            margin: const EdgeInsets.only(bottom: 8),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(10),
+              child: Row(
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(10),
+                    child: Container(
+                      width: 56,
+                      height: 56,
+                      color: const Color(0xFFF4F6F4),
+                      padding: const EdgeInsets.all(4),
+                      child: _netImage(
+                        item['image_url']?.toString(),
+                        fit: BoxFit.contain,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '${item['name']}',
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w800,
+                            fontSize: 13.5,
+                          ),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          '${item['pack']}',
+                          style: const TextStyle(
+                            fontSize: 11.5,
+                            color: Colors.black54,
+                          ),
+                        ),
+                        const SizedBox(height: 3),
+                        Row(
+                          children: [
+                            Text(
+                              '₹${(price * qty).toStringAsFixed(0)}',
+                              style: const TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w900,
+                                color: Color(0xFF1B7A2B),
+                              ),
+                            ),
+                            if (mrp > price) ...[
+                              const SizedBox(width: 6),
+                              Text(
+                                '₹${(mrp * qty).toStringAsFixed(0)}',
+                                style: const TextStyle(
+                                  fontSize: 11.5,
+                                  color: Colors.black45,
+                                  decoration: TextDecoration.lineThrough,
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  Container(
+                    height: 32,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF1B7A2B),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        InkWell(
+                          onTap: () => _changeCartQty(key, -1),
+                          child: const SizedBox(
+                            width: 30,
+                            height: 32,
+                            child: Icon(
+                              Icons.remove,
+                              color: Colors.white,
+                              size: 16,
+                            ),
+                          ),
+                        ),
+                        Text(
+                          '$qty',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w900,
+                            fontSize: 13,
+                          ),
+                        ),
+                        InkWell(
+                          onTap: () => _changeCartQty(key, 1),
+                          child: const SizedBox(
+                            width: 30,
+                            height: 32,
+                            child: Icon(
+                              Icons.add,
+                              color: Colors.white,
+                              size: 16,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }),
+
+        // Bill Summary Card
+        Card(
+          color: Colors.white,
+          margin: const EdgeInsets.only(top: 4, bottom: 10),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Bill Summary • बिल विवरण',
+                  style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text('Items Total • सामान का कुल'),
+                    Text(
+                      '₹${_cartTotal.toStringAsFixed(0)}',
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text('Delivery Charge • डिलीवरी चार्ज'),
+                    Text(
+                      _deliveryFee <= 0
+                          ? 'FREE'
+                          : '₹${_deliveryFee.toStringAsFixed(0)}',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w900,
+                        color: _deliveryFee <= 0
+                            ? const Color(0xFF1B7A2B)
+                            : Colors.black87,
+                      ),
+                    ),
+                  ],
+                ),
+                const Divider(height: 16),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      'Grand Total • कुल देय राशि',
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    Text(
+                      '₹${_grandTotal.toStringAsFixed(0)}',
+                      style: const TextStyle(
+                        fontSize: 16.5,
+                        fontWeight: FontWeight.w900,
+                        color: Color(0xFF1B7A2B),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+
+        // Delivery Details + Note/Landmark
+        Card(
+          color: Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Delivery Details',
+                  style: TextStyle(fontSize: 15.5, fontWeight: FontWeight.w800),
+                ),
+                const Text(
+                  'डिलीवरी की जानकारी',
+                  style: TextStyle(fontSize: 11.5, color: Colors.black54),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: _profileNameCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Name • आपका नाम',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _profilePhoneCtrl,
+                  keyboardType: TextInputType.phone,
+                  decoration: const InputDecoration(
+                    labelText: 'Phone • मोबाइल नंबर',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _profilePinCtrl,
+                  keyboardType: TextInputType.number,
+                  maxLength: 6,
+                  decoration: const InputDecoration(
+                    labelText: 'PIN Code • पिन कोड',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _profileAddrCtrl,
+                  maxLines: 2,
+                  decoration: const InputDecoration(
+                    labelText: 'Delivery Address • पूरा पता',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _deliveryNoteCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Landmark / Delivery Note (Optional)',
+                    hintText: 'जैसे: मंदिर के पास, आने से पहले कॉल करें',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                DropdownButtonFormField(
+                  value: _checkoutPayment,
+                  decoration: const InputDecoration(
+                    labelText: 'Payment Method • भुगतान का तरीका',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                  items: const [
+                    DropdownMenuItem(
+                      value: 'COD',
+                      child: Text('Cash on Delivery (COD)'),
+                    ),
+                    DropdownMenuItem(value: 'UPI', child: Text('UPI')),
+                  ],
+                  onChanged: (v) {
+                    if (v != null) {
+                      setState(() => _checkoutPayment = v.toString());
+                    }
+                  },
+                ),
+                const SizedBox(height: 14),
+                SizedBox(
+                  width: double.infinity,
+                  height: 48,
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF1B7A2B),
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    onPressed: _placingOrder ? null : _placeOrderFromCart,
+                    child: Text(
+                      _placingOrder
+                          ? 'Placing Order... • ऑर्डर भेजा जा रहा है'
+                          : 'Place Order (₹${_grandTotal.toStringAsFixed(0)}) • ऑर्डर करें',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildOrderStatusBar(String status) {
+    final isCancelled = status.toLowerCase().contains('cancel');
+    if (isCancelled) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+        decoration: BoxDecoration(
+          color: Colors.red.shade50,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.red.shade200),
+        ),
+        child: Text(
+          'Order Cancelled • ऑर्डर रद्द किया गया',
+          style: TextStyle(
+            color: Colors.red.shade700,
+            fontWeight: FontWeight.w800,
+            fontSize: 12,
+          ),
+        ),
+      );
+    }
+
+    final step = _statusStepIndex(status);
+    const labels = ['Placed', 'Packed', 'On Way', 'Delivered'];
+
+    return Row(
+      children: List.generate(4, (idx) {
+        final done = idx <= step;
+        return Expanded(
+          child: Column(
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Container(
+                      height: 2.5,
+                      color: idx == 0
+                          ? Colors.transparent
+                          : (done
+                              ? const Color(0xFF1B7A2B)
+                              : Colors.grey.shade300),
+                    ),
+                  ),
+                  Container(
+                    width: 18,
+                    height: 18,
+                    decoration: BoxDecoration(
+                      color:
+                          done ? const Color(0xFF1B7A2B) : Colors.grey.shade300,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      done ? Icons.check : Icons.circle,
+                      size: done ? 11 : 6,
+                      color: Colors.white,
+                    ),
+                  ),
+                  Expanded(
+                    child: Container(
+                      height: 2.5,
+                      color: idx == 3
+                          ? Colors.transparent
+                          : (idx < step
+                              ? const Color(0xFF1B7A2B)
+                              : Colors.grey.shade300),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Text(
+                labels[idx],
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: done ? FontWeight.w800 : FontWeight.w500,
+                  color: done ? const Color(0xFF1B7A2B) : Colors.black45,
+                ),
+              ),
+            ],
+          ),
+        );
+      }),
+    );
+  }
+
   Widget _buildOrdersTab() {
     return RefreshIndicator(
       onRefresh: _loadPrefsAndData,
@@ -2015,14 +2604,17 @@ class _CustomerShellScreenState extends State {
               itemCount: _orders.length,
               itemBuilder: (_, i) {
                 final ord = Map.from(_orders[i] as Map);
+                final orderId = _formatOrderId(ord['id']);
+                final dateStr = _formatDateTime(ord['created_at']);
                 final status = (ord['status'] ?? 'Pending').toString();
+                final isPending = status.toLowerCase() == 'pending';
                 final total = ord['total_amount'] ?? 0;
                 final items =
                     ord['items'] is List ? List.from(ord['items'] as List) : [];
 
                 return Card(
                   color: Colors.white,
-                  margin: const EdgeInsets.only(bottom: 10),
+                  margin: const EdgeInsets.only(bottom: 12),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(14),
                   ),
@@ -2031,82 +2623,187 @@ class _CustomerShellScreenState extends State {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        // Order ID + Date/Time + Total
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                                vertical: 3,
-                              ),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFE8F5E9),
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: Text(
-                                status,
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 12,
-                                  color: Color(0xFF1B7A2B),
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Order $orderId',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w900,
+                                    fontSize: 14.5,
+                                  ),
                                 ),
-                              ),
+                                if (dateStr.isNotEmpty)
+                                  Text(
+                                    '$dateStr • ${ord['payment_method'] ?? 'COD'}',
+                                    style: const TextStyle(
+                                      fontSize: 11.5,
+                                      color: Colors.black54,
+                                    ),
+                                  ),
+                              ],
                             ),
                             Text(
                               '₹$total',
                               style: const TextStyle(
                                 fontWeight: FontWeight.w900,
-                                fontSize: 16,
+                                fontSize: 16.5,
+                                color: Color(0xFF1B7A2B),
                               ),
                             ),
                           ],
                         ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'Items: ${items.length} • ${ord['payment_method'] ?? 'COD'}',
-                          style: const TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        if (items.isNotEmpty) ...[
-                          const SizedBox(height: 4),
-                          Text(
-                            items
-                                .take(3)
-                                .map((it) =>
-                                    '${Map.from(it as Map)['name']} (${Map.from(it)['qty']}x)')
-                                .join(', '),
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              fontSize: 12,
-                              color: Colors.black54,
-                            ),
-                          ),
-                        ],
                         const SizedBox(height: 10),
-                        SizedBox(
-                          width: double.infinity,
-                          height: 36,
-                          child: OutlinedButton.icon(
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: const Color(0xFF1B7A2B),
-                              side: const BorderSide(color: Color(0xFF1B7A2B)),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(10),
+
+                        // 4-Step Status Progress Bar
+                        _buildOrderStatusBar(status),
+                        const Divider(height: 18),
+
+                        // Real Photo Items List
+                        ...items.map((rawIt) {
+                          final it = Map.from(rawIt as Map);
+                          final qty = (it['qty'] as num?)?.toInt() ?? 1;
+                          final price = (it['price'] as num?)?.toDouble() ?? 0;
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 6),
+                            child: Row(
+                              children: [
+                                ClipRRect(
+                                  borderRadius: BorderRadius.circular(8),
+                                  child: Container(
+                                    width: 42,
+                                    height: 42,
+                                    color: const Color(0xFFF4F6F4),
+                                    padding: const EdgeInsets.all(3),
+                                    child: _netImage(
+                                      it['image_url']?.toString(),
+                                      fit: BoxFit.contain,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        (it['name'] ?? '').toString(),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.w700,
+                                          fontSize: 12.5,
+                                        ),
+                                      ),
+                                      Text(
+                                        '${it['pack'] ?? ''} × $qty',
+                                        style: const TextStyle(
+                                          fontSize: 11,
+                                          color: Colors.black54,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                Text(
+                                  '₹${(price * qty).toStringAsFixed(0)}',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w800,
+                                    fontSize: 12.5,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        }),
+
+                        const SizedBox(height: 8),
+
+                        // Action Buttons: Re-order, Help, Cancel (if Pending)
+                        Row(
+                          children: [
+                            Expanded(
+                              child: OutlinedButton.icon(
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: const Color(0xFF1B7A2B),
+                                  side: const BorderSide(
+                                    color: Color(0xFF1B7A2B),
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 8,
+                                  ),
+                                ),
+                                onPressed: () => _reorderItems(ord),
+                                icon: const Icon(Icons.refresh, size: 16),
+                                label: const Text(
+                                  'Re-order',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 12,
+                                  ),
+                                ),
                               ),
                             ),
-                            onPressed: () => _reorderItems(ord),
-                            icon: const Icon(Icons.refresh, size: 17),
-                            label: const Text(
-                              'Re-order • फिर से ऑर्डर करें',
-                              style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 12.5,
+                            const SizedBox(width: 6),
+                            OutlinedButton.icon(
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: Colors.black87,
+                                side: BorderSide(color: Colors.grey.shade400),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 8,
+                                ),
+                              ),
+                              onPressed: () => _openHelpDialog(ord),
+                              icon: const Icon(
+                                Icons.support_agent,
+                                size: 16,
+                                color: Color(0xFF1B7A2B),
+                              ),
+                              label: const Text(
+                                'Help',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 12,
+                                ),
                               ),
                             ),
-                          ),
+                            if (isPending) ...[
+                              const SizedBox(width: 6),
+                              OutlinedButton(
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: Colors.red.shade700,
+                                  side: BorderSide(color: Colors.red.shade300),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                    vertical: 8,
+                                  ),
+                                ),
+                                onPressed: () => _confirmCancelOrder(ord),
+                                child: const Text(
+                                  'Cancel',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ],
                         ),
                       ],
                     ),
@@ -2225,29 +2922,6 @@ class _CustomerShellScreenState extends State {
             onTap: _openWishlistSheet,
           ),
         ),
-        const SizedBox(height: 10),
-        Card(
-          color: Colors.white,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(14),
-          ),
-          child: ListTile(
-            leading: const Icon(
-              Icons.shopping_cart_outlined,
-              color: Color(0xFF1B7A2B),
-            ),
-            title: Text('Cart Items: $_cartCount'),
-            subtitle: Text('Total: ₹${_cartTotal.toStringAsFixed(0)}'),
-            trailing: ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF1B7A2B),
-                foregroundColor: Colors.white,
-              ),
-              onPressed: _openCartAndCheckout,
-              child: const Text('Checkout'),
-            ),
-          ),
-        ),
       ],
     );
   }
@@ -2275,6 +2949,9 @@ class _CustomerShellScreenState extends State {
           currentBody = _buildCategoriesTab();
           break;
         case 2:
+          currentBody = _buildCartTab();
+          break;
+        case 3:
           currentBody = _buildOrdersTab();
           break;
         default:
@@ -2284,38 +2961,40 @@ class _CustomerShellScreenState extends State {
 
     return Scaffold(
       body: SafeArea(child: currentBody),
-      floatingActionButton: _cartCount > 0
-          ? FloatingActionButton.extended(
-              backgroundColor: const Color(0xFF1B7A2B),
-              foregroundColor: Colors.white,
-              onPressed: _openCartAndCheckout,
-              icon: const Icon(Icons.shopping_bag),
-              label: Text(
-                'Cart ($_cartCount) • ₹${_cartTotal.toStringAsFixed(0)}',
-              ),
-            )
-          : null,
       bottomNavigationBar: NavigationBar(
         selectedIndex: _tabIndex,
         indicatorColor: const Color(0xFFE8F5E9),
         onDestinationSelected: (i) => setState(() => _tabIndex = i),
-        destinations: const [
-          NavigationDestination(
+        destinations: [
+          const NavigationDestination(
             icon: Icon(Icons.home_outlined),
             selectedIcon: Icon(Icons.home),
             label: 'Home',
           ),
-          NavigationDestination(
+          const NavigationDestination(
             icon: Icon(Icons.grid_view_outlined),
             selectedIcon: Icon(Icons.grid_view),
             label: 'Categories',
           ),
           NavigationDestination(
+            icon: Badge(
+              isLabelVisible: _cartCount > 0,
+              label: Text('$_cartCount'),
+              child: const Icon(Icons.shopping_cart_outlined),
+            ),
+            selectedIcon: Badge(
+              isLabelVisible: _cartCount > 0,
+              label: Text('$_cartCount'),
+              child: const Icon(Icons.shopping_cart),
+            ),
+            label: 'Cart',
+          ),
+          const NavigationDestination(
             icon: Icon(Icons.receipt_long_outlined),
             selectedIcon: Icon(Icons.receipt_long),
             label: 'Orders',
           ),
-          NavigationDestination(
+          const NavigationDestination(
             icon: Icon(Icons.person_outline),
             selectedIcon: Icon(Icons.person),
             label: 'Profile',
