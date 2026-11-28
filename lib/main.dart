@@ -100,13 +100,13 @@ class _CustomerShellScreenState extends State<CustomerShellScreen> {
           .order('sort_order');
       final cats = List>.from(catRes as List);
 
-      List> subCats = [];
+      List> loadedSubCats = [];
       try {
         final subRes = await _supabase
             .from('deua_sub_categories')
             .select()
             .order('sort_order');
-        subCats = List>.from(subRes as List);
+        loadedSubCats = List>.from(subRes as List);
       } catch (_) {}
 
       final prodRes = await _supabase
@@ -115,7 +115,7 @@ class _CustomerShellScreenState extends State<CustomerShellScreen> {
           .order('created_at', ascending: false);
       final prods = List>.from(prodRes as List);
 
-      List> ords = [];
+      List> loadedOrders = [];
       try {
         if (_customerPhone.trim().isNotEmpty) {
           final ordRes = await _supabase
@@ -123,23 +123,23 @@ class _CustomerShellScreenState extends State<CustomerShellScreen> {
               .select()
               .eq('customer_phone', _customerPhone.trim())
               .order('created_at', ascending: false);
-          ords = List>.from(ordRes as List);
+          loadedOrders = List>.from(ordRes as List);
         } else {
           final ordRes = await _supabase
               .from('deua_orders')
               .select()
               .order('created_at', ascending: false)
               .limit(20);
-          ords = List>.from(ordRes as List);
+          loadedOrders = List>.from(ordRes as List);
         }
       } catch (_) {}
 
       if (!mounted) return;
       setState(() {
         _categories = cats;
-        _subCategories = subCats;
+        _subCategories = loadedSubCats;
         _products = prods;
-        _orders = ords;
+        _orders = loadedOrders;
 
         final validIds = cats.map((c) => c['id'].toString()).toSet();
         if (_selectedCatId.isEmpty || !validIds.contains(_selectedCatId)) {
@@ -277,8 +277,8 @@ class _CustomerShellScreenState extends State<CustomerShellScreen> {
           .from('deua_service_pincodes')
           .select()
           .eq('pincode', clean);
-      final list = List>.from(res as List);
-      final activeRow = list.where((r) => r['is_active'] != false).toList();
+      final pinRows = List>.from(res as List);
+      final activeRow = pinRows.where((r) => r['is_active'] != false).toList();
 
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('deua_pincode', clean);
