@@ -287,7 +287,8 @@ class _CustomerShellScreenState extends State<CustomerShellScreen> {
       if (activeRow.isNotEmpty) {
         final area = (activeRow.first['area_name'] ?? '').toString();
         _toast(
-            'Delivery available in $clean ${area.isNotEmpty ? "($area)" : ""}');
+          'Delivery available in $clean ${area.isNotEmpty ? "($area)" : ""}',
+        );
       } else {
         _toast(
           'Is PIN par abhi delivery active nahi hai, lekin PIN save ho gaya.',
