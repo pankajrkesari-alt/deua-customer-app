@@ -13,7 +13,7 @@ const double kDeliveryCharge = 0; // Abhi FREE hai; aage 15 ya 20 kar sakte hain
 const double kFreeDeliveryMinOrder = 0; // Jaise 199 se upar FREE rakhna ho
 const String kSupportPhone = '+91 99999 99999'; // Apna WhatsApp/Call number dalein
 const String kUpiId = 'pankajram3507@pnb';
-const String kUpiName = 'PANKAJ RAM';
+const String kUpiBrandName = 'DEUA-FRESH';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -594,7 +594,7 @@ class _CustomerShellScreenState extends State {
   Future _openHelpDialog(Map ord) async {
     final orderId = _formatOrderId(ord['id']);
     final helpMsg =
-        'Hello DEUA FRESH, mujhe Order $orderId (₹${ord['total_amount'] ?? 0}) mein madad chahiye.';
+        'Hello $kUpiBrandName, mujhe Order $orderId (₹${ord['total_amount'] ?? 0}) mein madad chahiye.';
 
     await showDialog(
       context: context,
@@ -1085,7 +1085,7 @@ class _CustomerShellScreenState extends State {
   Widget _buildUpiQrCard() {
     final amountStr = _grandTotal.toStringAsFixed(2);
     final upiUri =
-        'upi://pay?pa=$kUpiId&pn=${Uri.encodeComponent(kUpiName)}&am=$amountStr&cu=INR&tn=${Uri.encodeComponent('DEUA FRESH Order')}';
+        'upi://pay?pa=$kUpiId&pn=${Uri.encodeComponent(kUpiBrandName)}&am=$amountStr&cu=INR&tn=${Uri.encodeComponent(kUpiBrandName)}';
     final qrUrl =
         'https://api.qrserver.com/v1/create-qr-code/?size=280x280&ecc=H&margin=8&data=${Uri.encodeComponent(upiUri)}';
 
@@ -1150,7 +1150,7 @@ class _CustomerShellScreenState extends State {
                     height: 196,
                     child: Center(
                       child: Text(
-                        'QR load nahi hua.\nNeeche UPI ID copy karein.',
+                        'QR load nahi ho paya.\nKripya dobara koshish karein.',
                         textAlign: TextAlign.center,
                         style: TextStyle(fontSize: 12, color: Colors.black54),
                       ),
@@ -1187,60 +1187,17 @@ class _CustomerShellScreenState extends State {
             ),
           ),
           const SizedBox(height: 10),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: Colors.grey.shade300),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(
-                  Icons.account_balance_wallet_outlined,
-                  size: 16,
-                  color: Color(0xFF1B7A2B),
-                ),
-                const SizedBox(width: 6),
-                const Text(
-                  kUpiId,
-                  style: TextStyle(
-                    fontWeight: FontWeight.w800,
-                    fontSize: 13,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                InkWell(
-                  onTap: () {
-                    Clipboard.setData(const ClipboardData(text: kUpiId));
-                    _toast('UPI ID copied • यूपीआई आईडी कॉपी हो गई');
-                  },
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 3,
-                    ),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFE8F5E9),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: const Text(
-                      'Copy',
-                      style: TextStyle(
-                        color: Color(0xFF1B7A2B),
-                        fontWeight: FontWeight.w800,
-                        fontSize: 11.5,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
+          const Text(
+            kUpiBrandName,
+            style: TextStyle(
+              fontWeight: FontWeight.w900,
+              fontSize: 14,
+              color: Color(0xFF1B7A2B),
             ),
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 4),
           const Text(
-            '$kUpiName • Payment karne ke baad "Place Order" dabayein',
+            'Payment karne ke baad "Place Order" dabayein',
             textAlign: TextAlign.center,
             style: TextStyle(fontSize: 11, color: Colors.black54),
           ),
