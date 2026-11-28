@@ -41,28 +41,28 @@ class CustomerShellScreen extends StatefulWidget {
   const CustomerShellScreen({super.key});
 
   @override
-  State<CustomerShellScreen> createState() => _CustomerShellScreenState();
+  State createState() => _CustomerShellScreenState();
 }
 
-class _CustomerShellScreenState extends State<CustomerShellScreen> {
+class _CustomerShellScreenState extends State {
   final _supabase = Supabase.instance.client;
 
   int _tabIndex = 1;
   bool _loading = true;
   String? _error;
 
-  List> _categories = [];
-  List> _subCategories = [];
-  List> _products = [];
-  List> _orders = [];
+  List _categories = [];
+  List _subCategories = [];
+  List _products = [];
+  List _orders = [];
 
   String _selectedCatId = '';
   String _selectedSubCatId = 'all';
   String _searchQuery = '';
   final _searchCtrl = TextEditingController();
 
-  final Map<String, int> _selectedPackIndex = {};
-  final Map<String, Map<String, dynamic>> _cart = {};
+  final Map _selectedPackIndex = {};
+  final Map _cart = {};
 
   String _savedPincode = '';
   String _customerName = '';
@@ -81,7 +81,7 @@ class _CustomerShellScreenState extends State<CustomerShellScreen> {
     super.dispose();
   }
 
-  Future<void> _loadPrefsAndData() async {
+  Future _loadPrefsAndData() async {
     setState(() {
       _loading = true;
       _error = null;
@@ -98,24 +98,24 @@ class _CustomerShellScreenState extends State<CustomerShellScreen> {
           .from('deua_main_categories')
           .select()
           .order('sort_order');
-      final cats = List>.from(catRes as List);
+      final cats = List.from(catRes as List);
 
-      List> loadedSubCats = [];
+      List subCats = [];
       try {
         final subRes = await _supabase
             .from('deua_sub_categories')
             .select()
             .order('sort_order');
-        loadedSubCats = List>.from(subRes as List);
+        subCats = List.from(subRes as List);
       } catch (_) {}
 
       final prodRes = await _supabase
           .from('deua_products')
           .select()
           .order('created_at', ascending: false);
-      final prods = List>.from(prodRes as List);
+      final prods = List.from(prodRes as List);
 
-      List> loadedOrders = [];
+      List ords = [];
       try {
         if (_customerPhone.trim().isNotEmpty) {
           final ordRes = await _supabase
@@ -123,27 +123,28 @@ class _CustomerShellScreenState extends State<CustomerShellScreen> {
               .select()
               .eq('customer_phone', _customerPhone.trim())
               .order('created_at', ascending: false);
-          loadedOrders = List>.from(ordRes as List);
+          ords = List.from(ordRes as List);
         } else {
           final ordRes = await _supabase
               .from('deua_orders')
               .select()
               .order('created_at', ascending: false)
               .limit(20);
-          loadedOrders = List>.from(ordRes as List);
+          ords = List.from(ordRes as List);
         }
       } catch (_) {}
 
       if (!mounted) return;
       setState(() {
         _categories = cats;
-        _subCategories = loadedSubCats;
+        _subCategories = subCats;
         _products = prods;
-        _orders = loadedOrders;
+        _orders = ords;
 
-        final validIds = cats.map((c) => c['id'].toString()).toSet();
+        final validIds = cats.map((c) => Map.from(c as Map)['id'].toString()).toSet();
         if (_selectedCatId.isEmpty || !validIds.contains(_selectedCatId)) {
-          _selectedCatId = cats.isNotEmpty ? cats.first['id'].toString() : '';
+          _selectedCatId =
+              cats.isNotEmpty ? Map.from(cats.first as Map)['id'].toString() : '';
           _selectedSubCatId = 'all';
         }
         _loading = false;
@@ -157,10 +158,10 @@ class _CustomerShellScreenState extends State<CustomerShellScreen> {
     }
   }
 
-  List> _packsOf(Map<String, dynamic> prod) {
+  List _packsOf(Map prod) {
     final raw = prod['packs'];
     if (raw is List && raw.isNotEmpty) {
-      return raw.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+      return raw.map((e) => Map.from(e as Map)).toList();
     }
     final price = (prod['price'] as num?)?.toDouble() ?? 0;
     final mrp = (prod['mrp'] as num?)?.toDouble() ?? price;
@@ -173,7 +174,7 @@ class _CustomerShellScreenState extends State<CustomerShellScreen> {
     ];
   }
 
-  void _addToCart(Map<String, dynamic> prod) {
+  void _addToCart(Map prod) {
     if (prod['in_stock'] == false) {
       _toast('यह सामान अभी Out of Stock है।', isError: true);
       return;
@@ -181,8 +182,8 @@ class _CustomerShellScreenState extends State<CustomerShellScreen> {
     final pid = prod['id'].toString();
     final packs = _packsOf(prod);
     final int pIdx =
-        (_selectedPackIndex[pid] ?? 0).clamp(0, packs.length - 1).toInt();
-    final pack = packs[pIdx];
+        ((_selectedPackIndex[pid] as int?) ?? 0).clamp(0, packs.length - 1).toInt();
+    final pack = Map.from(packs[pIdx] as Map);
     final key = '${pid}_$pIdx';
 
     final price = (pack['price'] as num?)?.toDouble() ?? 0;
@@ -190,7 +191,9 @@ class _CustomerShellScreenState extends State<CustomerShellScreen> {
 
     setState(() {
       if (_cart.containsKey(key)) {
-        _cart[key]!['qty'] = ((_cart[key]!['qty'] as num?)?.toInt() ?? 1) + 1;
+        final cur = Map.from(_cart[key] as Map);
+        cur['qty'] = ((cur['qty'] as num?)?.toInt() ?? 1) + 1;
+        _cart[key] = cur;
       } else {
         _cart[key] = {
           'product_id': pid,
@@ -208,18 +211,21 @@ class _CustomerShellScreenState extends State<CustomerShellScreen> {
   void _changeCartQty(String key, int delta) {
     setState(() {
       if (!_cart.containsKey(key)) return;
-      final nextQty = ((_cart[key]!['qty'] as num?)?.toInt() ?? 1) + delta;
+      final cur = Map.from(_cart[key] as Map);
+      final nextQty = ((cur['qty'] as num?)?.toInt() ?? 1) + delta;
       if (nextQty <= 0) {
         _cart.remove(key);
       } else {
-        _cart[key]!['qty'] = nextQty;
+        cur['qty'] = nextQty;
+        _cart[key] = cur;
       }
     });
   }
 
   double get _cartTotal {
     double sum = 0;
-    for (final item in _cart.values) {
+    for (final rawItem in _cart.values) {
+      final item = Map.from(rawItem as Map);
       final p = (item['price'] as num?)?.toDouble() ?? 0;
       final q = (item['qty'] as num?)?.toInt() ?? 1;
       sum += p * q;
@@ -229,7 +235,8 @@ class _CustomerShellScreenState extends State<CustomerShellScreen> {
 
   int get _cartCount {
     int cnt = 0;
-    for (final item in _cart.values) {
+    for (final rawItem in _cart.values) {
+      final item = Map.from(rawItem as Map);
       cnt += (item['qty'] as num?)?.toInt() ?? 1;
     }
     return cnt;
@@ -246,7 +253,7 @@ class _CustomerShellScreenState extends State<CustomerShellScreen> {
     );
   }
 
-  Future<void> _saveProfileDetails({
+  Future _saveProfileDetails({
     required String name,
     required String phone,
     required String address,
@@ -266,7 +273,7 @@ class _CustomerShellScreenState extends State<CustomerShellScreen> {
     _toast('Profile details save ho gayi.');
   }
 
-  Future<void> _checkPincode(String pin) async {
+  Future _checkPincode(String pin) async {
     final clean = pin.trim();
     if (clean.length != 6) {
       _toast('6 digit ka PIN code dalein.', isError: true);
@@ -277,8 +284,11 @@ class _CustomerShellScreenState extends State<CustomerShellScreen> {
           .from('deua_service_pincodes')
           .select()
           .eq('pincode', clean);
-      final pinRows = List>.from(res as List);
-      final activeRow = pinRows.where((r) => r['is_active'] != false).toList();
+      final list = List.from(res as List);
+      final activeRow = list
+          .map((r) => Map.from(r as Map))
+          .where((r) => r['is_active'] != false)
+          .toList();
 
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('deua_pincode', clean);
@@ -303,7 +313,7 @@ class _CustomerShellScreenState extends State<CustomerShellScreen> {
     }
   }
 
-  Future<void> _openCartAndCheckout() async {
+  Future _openCartAndCheckout() async {
     if (_cart.isEmpty) {
       _toast('Cart khali hai, pehle सामान add karein.', isError: true);
       return;
@@ -356,8 +366,8 @@ class _CustomerShellScreenState extends State<CustomerShellScreen> {
                 ),
                 const SizedBox(height: 8),
                 ..._cart.entries.map((entry) {
-                  final key = entry.key;
-                  final item = entry.value;
+                  final key = entry.key.toString();
+                  final item = Map.from(entry.value as Map);
                   final qty = (item['qty'] as num?)?.toInt() ?? 1;
                   final price = (item['price'] as num?)?.toDouble() ?? 0;
                   return Card(
@@ -448,8 +458,8 @@ class _CustomerShellScreenState extends State<CustomerShellScreen> {
                   ),
                 ),
                 const SizedBox(height: 10),
-                DropdownButtonFormField<String>(
-                  initialValue: paymentMethod,
+                DropdownButtonFormField(
+                  value: paymentMethod,
                   decoration: const InputDecoration(
                     labelText: 'Payment Method',
                     border: OutlineInputBorder(),
@@ -463,7 +473,7 @@ class _CustomerShellScreenState extends State<CustomerShellScreen> {
                     DropdownMenuItem(value: 'UPI', child: Text('UPI')),
                   ],
                   onChanged: (v) {
-                    if (v != null) setModal(() => paymentMethod = v);
+                    if (v != null) setModal(() => paymentMethod = v.toString());
                   },
                 ),
                 const SizedBox(height: 12),
@@ -569,12 +579,12 @@ class _CustomerShellScreenState extends State<CustomerShellScreen> {
     );
   }
 
-  Widget _buildProductCard(Map<String, dynamic> prod) {
+  Widget _buildProductCard(Map prod) {
     final pid = prod['id'].toString();
     final packs = _packsOf(prod);
     final int pIdx =
-        (_selectedPackIndex[pid] ?? 0).clamp(0, packs.length - 1).toInt();
-    final activePack = packs[pIdx];
+        ((_selectedPackIndex[pid] as int?) ?? 0).clamp(0, packs.length - 1).toInt();
+    final activePack = Map.from(packs[pIdx] as Map);
     final price = (activePack['price'] as num?)?.toDouble() ?? 0;
     final mrp = (activePack['mrp'] as num?)?.toDouble() ?? price;
     final disc = (prod['discount_percent'] as num?)?.toInt() ?? 0;
@@ -625,8 +635,8 @@ class _CustomerShellScreenState extends State<CustomerShellScreen> {
                 if (packs.length > 1)
                   SizedBox(
                     height: 28,
-                    child: DropdownButtonFormField<int>(
-                      initialValue: pIdx,
+                    child: DropdownButtonFormField(
+                      value: pIdx,
                       isDense: true,
                       decoration: const InputDecoration(
                         contentPadding: EdgeInsets.symmetric(
@@ -637,10 +647,10 @@ class _CustomerShellScreenState extends State<CustomerShellScreen> {
                       ),
                       items: List.generate(
                         packs.length,
-                        (idx) => DropdownMenuItem<int>(
+                        (idx) => DropdownMenuItem(
                           value: idx,
                           child: Text(
-                            (packs[idx]['label'] ?? '').toString(),
+                            (Map.from(packs[idx] as Map)['label'] ?? '').toString(),
                             style: const TextStyle(fontSize: 11.5),
                           ),
                         ),
@@ -785,7 +795,7 @@ class _CustomerShellScreenState extends State<CustomerShellScreen> {
               crossAxisSpacing: 10,
               mainAxisSpacing: 10,
             ),
-            itemBuilder: (_, i) => _buildProductCard(_products[i]),
+            itemBuilder: (_, i) => _buildProductCard(Map.from(_products[i] as Map)),
           ),
         ],
       ),
@@ -795,18 +805,22 @@ class _CustomerShellScreenState extends State<CustomerShellScreen> {
   Widget _buildCategoriesTab() {
     final q = _searchQuery.trim().toLowerCase();
     final activeSubCats = _subCategories
+        .map((s) => Map.from(s as Map))
         .where((s) => (s['main_category_id'] ?? '').toString() == _selectedCatId)
         .toList();
 
-    final catProducts = _products.where((p) {
-      final matchesCat = _selectedCatId.isEmpty ||
-          (p['main_category_id'] ?? '').toString() == _selectedCatId;
-      final matchesSubCat = _selectedSubCatId == 'all' ||
-          (p['sub_category_id'] ?? '').toString() == _selectedSubCatId;
-      final matchesSearch =
-          q.isEmpty || (p['name'] ?? '').toString().toLowerCase().contains(q);
-      return matchesCat && matchesSubCat && matchesSearch;
-    }).toList();
+    final catProducts = _products
+        .map((p) => Map.from(p as Map))
+        .where((p) {
+          final matchesCat = _selectedCatId.isEmpty ||
+              (p['main_category_id'] ?? '').toString() == _selectedCatId;
+          final matchesSubCat = _selectedSubCatId == 'all' ||
+              (p['sub_category_id'] ?? '').toString() == _selectedSubCatId;
+          final matchesSearch =
+              q.isEmpty || (p['name'] ?? '').toString().toLowerCase().contains(q);
+          return matchesCat && matchesSubCat && matchesSearch;
+        })
+        .toList();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -922,7 +936,7 @@ class _CustomerShellScreenState extends State<CustomerShellScreen> {
                   child: ListView.builder(
                     itemCount: _categories.length,
                     itemBuilder: (_, i) {
-                      final cat = _categories[i];
+                      final cat = Map.from(_categories[i] as Map);
                       final cid = cat['id'].toString();
                       final selected = cid == _selectedCatId;
                       final hindi = (cat['hindi_name'] ?? '').toString();
@@ -930,7 +944,9 @@ class _CustomerShellScreenState extends State<CustomerShellScreen> {
                       final itemCount = _products
                           .where(
                             (p) =>
-                                (p['main_category_id'] ?? '').toString() == cid,
+                                (Map.from(p as Map)['main_category_id'] ?? '')
+                                    .toString() ==
+                                cid,
                           )
                           .length;
 
@@ -1026,8 +1042,7 @@ class _CustomerShellScreenState extends State<CustomerShellScreen> {
                             crossAxisSpacing: 8,
                             mainAxisSpacing: 8,
                           ),
-                          itemBuilder: (_, i) =>
-                              _buildProductCard(catProducts[i]),
+                          itemBuilder: (_, i) => _buildProductCard(catProducts[i]),
                         ),
                 ),
               ),
@@ -1053,7 +1068,7 @@ class _CustomerShellScreenState extends State<CustomerShellScreen> {
               padding: const EdgeInsets.all(12),
               itemCount: _orders.length,
               itemBuilder: (_, i) {
-                final ord = _orders[i];
+                final ord = Map.from(_orders[i] as Map);
                 final status = (ord['status'] ?? 'Pending').toString();
                 final total = ord['total_amount'] ?? 0;
                 final items =
