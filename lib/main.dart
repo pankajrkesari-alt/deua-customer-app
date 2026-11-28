@@ -55,13 +55,22 @@ class _CustomerShellScreenState extends State {
   List _subCategories = [];
   List _products = [];
   List _orders = [];
+  List _banners = [];
 
-  String _selectedCatId = '';
+  String _selectedCatId = 'all';
   String _selectedSubCatId = 'all';
   String _searchQuery = '';
   bool _showCatSearch = false;
+  int _bannerPage = 0;
+
+  final _bannerCtrl = PageController();
   final _searchCtrl = TextEditingController();
   final _homeSearchCtrl = TextEditingController();
+
+  final _profileNameCtrl = TextEditingController();
+  final _profilePhoneCtrl = TextEditingController();
+  final _profileAddrCtrl = TextEditingController();
+  final _profilePinCtrl = TextEditingController();
 
   final Map _selectedPackIndex = {};
   final Map _cart = {};
@@ -80,8 +89,13 @@ class _CustomerShellScreenState extends State {
 
   @override
   void dispose() {
+    _bannerCtrl.dispose();
     _searchCtrl.dispose();
     _homeSearchCtrl.dispose();
+    _profileNameCtrl.dispose();
+    _profilePhoneCtrl.dispose();
+    _profileAddrCtrl.dispose();
+    _profilePinCtrl.dispose();
     super.dispose();
   }
 
@@ -96,6 +110,15 @@ class _CustomerShellScreenState extends State {
     _customerName = prefs.getString('deua_cust_name') ?? '';
     _customerPhone = prefs.getString('deua_cust_phone') ?? '';
     _customerAddress = prefs.getString('deua_cust_addr') ?? '';
+
+    _profileNameCtrl.text = _customerName;
+    _profilePhoneCtrl.text = _customerPhone;
+    _profileAddrCtrl.text = _customerAddress;
+    _profilePinCtrl.text = _savedPincode;
+
+    final savedFavs = prefs.getStringList('deua_favs') ?? [];
+    _favorites.clear();
+    _favorites.addAll(savedFavs);
 
     try {
       final catRes = await _supabase
@@ -118,6 +141,16 @@ class _CustomerShellScreenState extends State {
           .select()
           .order('created_at', ascending: false);
       final prods = List.from(prodRes as List);
+
+      List loadedBanners = [];
+      try {
+        final banRes = await _supabase
+            .from('deua_banners')
+            .select()
+            .eq('is_active', true)
+            .order('sort_order');
+        loadedBanners = List.from(banRes as List);
+      } catch (_) {}
 
       List ords = [];
       try {
@@ -143,14 +176,13 @@ class _CustomerShellScreenState extends State {
         _categories = cats;
         _subCategories = subCats;
         _products = prods;
+        _banners = loadedBanners;
         _orders = ords;
 
         final validIds =
             cats.map((c) => Map.from(c as Map)['id'].toString()).toSet();
-        if (_selectedCatId.isEmpty || !validIds.contains(_selectedCatId)) {
-          _selectedCatId = cats.isNotEmpty
-              ? Map.from(cats.first as Map)['id'].toString()
-              : '';
+        if (_selectedCatId != 'all' && !validIds.contains(_selectedCatId)) {
+          _selectedCatId = 'all';
           _selectedSubCatId = 'all';
         }
         _loading = false;
@@ -162,6 +194,21 @@ class _CustomerShellScreenState extends State {
         _loading = false;
       });
     }
+  }
+
+  Future _toggleFavorite(String pid) async {
+    setState(() {
+      if (_favorites.contains(pid)) {
+        _favorites.remove(pid);
+      } else {
+        _favorites.add(pid);
+      }
+    });
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(
+      'deua_favs',
+      _favorites.map((e) => e.toString()).toList(),
+    );
   }
 
   List _packsOf(Map prod) {
@@ -182,7 +229,7 @@ class _CustomerShellScreenState extends State {
 
   void _addToCart(Map prod) {
     if (prod['in_stock'] == false) {
-      _toast('यह सामान अभी Out of Stock है।', isError: true);
+      _toast('Out of Stock • यह सामान अभी उपलब्ध नहीं है', isError: true);
       return;
     }
     final pid = prod['id'].toString();
@@ -212,7 +259,41 @@ class _CustomerShellScreenState extends State {
         };
       }
     });
-    _toast('${prod['name']} ($label) cart mein add hua');
+    _toast('${prod['name']} ($label) added • कार्ट में जुड़ा');
+  }
+
+  void _reorderItems(Map ord) {
+    final rawItems = ord['items'];
+    if (rawItems is! List || rawItems.isEmpty) {
+      _toast('Is order mein koi item nahi mila.', isError: true);
+      return;
+    }
+    setState(() {
+      for (final raw in rawItems) {
+        final item = Map.from(raw as Map);
+        final pid = (item['product_id'] ?? item['name'] ?? '').toString();
+        final pack = (item['pack'] ?? '1 pack').toString();
+        final key = 're_${pid}_$pack';
+        final qty = (item['qty'] as num?)?.toInt() ?? 1;
+        final price = (item['price'] as num?)?.toDouble() ?? 0;
+        if (_cart.containsKey(key)) {
+          final cur = Map.from(_cart[key] as Map);
+          cur['qty'] = ((cur['qty'] as num?)?.toInt() ?? 1) + qty;
+          _cart[key] = cur;
+        } else {
+          _cart[key] = {
+            'product_id': pid,
+            'name': (item['name'] ?? '').toString(),
+            'pack': pack,
+            'price': price,
+            'image_url': (item['image_url'] ?? '').toString(),
+            'qty': qty,
+          };
+        }
+      }
+    });
+    _toast('Items cart mein add ho gaye • कार्ट में जुड़ गए');
+    _openCartAndCheckout();
   }
 
   void _changeCartQty(String key, int delta) {
@@ -277,13 +358,13 @@ class _CustomerShellScreenState extends State {
       _customerAddress = address.trim();
       _savedPincode = pincode.trim();
     });
-    _toast('Profile details save ho gayi.');
+    _toast('Profile saved • प्रोफाइल सेव हो गई');
   }
 
   Future _checkPincode(String pin) async {
     final clean = pin.trim();
     if (clean.length != 6) {
-      _toast('6 digit ka PIN code dalein.', isError: true);
+      _toast('Enter 6-digit PIN • 6 अंकों का पिन डालें', isError: true);
       return;
     }
     try {
@@ -308,7 +389,7 @@ class _CustomerShellScreenState extends State {
         );
       } else {
         _toast(
-          'Is PIN par abhi delivery active nahi hai, lekin PIN save ho gaya.',
+          'Delivery not active on $clean yet, PIN saved.',
           isError: true,
         );
       }
@@ -316,20 +397,128 @@ class _CustomerShellScreenState extends State {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('deua_pincode', clean);
       setState(() => _savedPincode = clean);
-      _toast('PIN code $clean save kar liya gaya.');
+      _toast('PIN code $clean saved.');
     }
+  }
+
+  Future _openWishlistSheet() async {
+    final favProds = _products
+        .map((p) => Map.from(p as Map))
+        .where((p) => _favorites.contains(p['id'].toString()))
+        .toList();
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => Container(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(ctx).size.height * 0.72,
+        ),
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Saved Items (${favProds.length})',
+                      style: const TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const Text(
+                      'पसंदीदा सामान',
+                      style: TextStyle(fontSize: 11.5, color: Colors.black54),
+                    ),
+                  ],
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close),
+                  onPressed: () => Navigator.pop(ctx),
+                ),
+              ],
+            ),
+            const Divider(),
+            Expanded(
+              child: favProds.isEmpty
+                  ? const Center(
+                      child: Text(
+                        'No saved items yet • अभी कोई पसंदीदा सामान नहीं है',
+                        textAlign: TextAlign.center,
+                      ),
+                    )
+                  : ListView.builder(
+                      itemCount: favProds.length,
+                      itemBuilder: (_, i) {
+                        final prod = favProds[i];
+                        final packs = _packsOf(prod);
+                        final p0 = Map.from(packs.first as Map);
+                        final price = (p0['price'] as num?)?.toDouble() ?? 0;
+                        return Card(
+                          color: Colors.white,
+                          margin: const EdgeInsets.only(bottom: 8),
+                          child: ListTile(
+                            leading: ClipRRect(
+                              borderRadius: BorderRadius.circular(8),
+                              child: _netImage(
+                                prod['image_url']?.toString(),
+                                width: 48,
+                                height: 48,
+                              ),
+                            ),
+                            title: Text(
+                              (prod['name'] ?? '').toString(),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13.5,
+                              ),
+                            ),
+                            subtitle: Text(
+                              '₹${price.toStringAsFixed(0)} • ${p0['label']}',
+                            ),
+                            trailing: ElevatedButton(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: const Color(0xFF1B7A2B),
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                ),
+                              ),
+                              onPressed: () {
+                                _addToCart(prod);
+                              },
+                              child: const Text('Add'),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future _openCartAndCheckout() async {
     if (_cart.isEmpty) {
-      _toast('Cart khali hai, pehle सामान add karein.', isError: true);
+      _toast('Cart is empty • पहले सामान जोड़ें', isError: true);
       return;
     }
 
     final nameCtrl = TextEditingController(text: _customerName);
     final phoneCtrl = TextEditingController(text: _customerPhone);
     final addrCtrl = TextEditingController(
-      text: _customerAddress.isNotEmpty ? _customerAddress : 'Deua Village, Bihar',
+      text: _customerAddress.isNotEmpty
+          ? _customerAddress
+          : 'Deua Village, Bihar',
     );
     final pinCtrl = TextEditingController(text: _savedPincode);
     String paymentMethod = 'COD';
@@ -354,17 +543,26 @@ class _CustomerShellScreenState extends State {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text(
-                      'Cart ($_cartCount) • Checkout',
-                      style: const TextStyle(
-                        fontSize: 17,
-                        fontWeight: FontWeight.bold,
-                      ),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Cart ($_cartCount) • Checkout',
+                          style: const TextStyle(
+                            fontSize: 17,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const Text(
+                          'कार्ट और ऑर्डर कन्फर्म करें',
+                          style: TextStyle(fontSize: 11.5, color: Colors.black54),
+                        ),
+                      ],
                     ),
                     Text(
                       '₹${_cartTotal.toStringAsFixed(0)}',
                       style: const TextStyle(
-                        fontSize: 16,
+                        fontSize: 17,
                         fontWeight: FontWeight.w900,
                         color: Color(0xFF1B7A2B),
                       ),
@@ -428,7 +626,7 @@ class _CustomerShellScreenState extends State {
                 TextField(
                   controller: nameCtrl,
                   decoration: const InputDecoration(
-                    labelText: 'आपका नाम • Name',
+                    labelText: 'Name • आपका नाम',
                     border: OutlineInputBorder(),
                     isDense: true,
                   ),
@@ -438,7 +636,7 @@ class _CustomerShellScreenState extends State {
                   controller: phoneCtrl,
                   keyboardType: TextInputType.phone,
                   decoration: const InputDecoration(
-                    labelText: 'मोबाइल नंबर • Phone',
+                    labelText: 'Phone • मोबाइल नंबर',
                     border: OutlineInputBorder(),
                     isDense: true,
                   ),
@@ -449,7 +647,7 @@ class _CustomerShellScreenState extends State {
                   keyboardType: TextInputType.number,
                   maxLength: 6,
                   decoration: const InputDecoration(
-                    labelText: 'PIN Code',
+                    labelText: 'PIN Code • पिन कोड',
                     border: OutlineInputBorder(),
                     isDense: true,
                   ),
@@ -459,7 +657,7 @@ class _CustomerShellScreenState extends State {
                   controller: addrCtrl,
                   maxLines: 2,
                   decoration: const InputDecoration(
-                    labelText: 'पूरा पता • Delivery Address',
+                    labelText: 'Delivery Address • पूरा पता',
                     border: OutlineInputBorder(),
                     isDense: true,
                   ),
@@ -468,7 +666,7 @@ class _CustomerShellScreenState extends State {
                 DropdownButtonFormField(
                   value: paymentMethod,
                   decoration: const InputDecoration(
-                    labelText: 'Payment Method',
+                    labelText: 'Payment Method • भुगतान का तरीका',
                     border: OutlineInputBorder(),
                     isDense: true,
                   ),
@@ -486,11 +684,14 @@ class _CustomerShellScreenState extends State {
                 const SizedBox(height: 12),
                 SizedBox(
                   width: double.infinity,
-                  height: 46,
+                  height: 48,
                   child: ElevatedButton(
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF1B7A2B),
                       foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
                     ),
                     onPressed: placing
                         ? null
@@ -540,7 +741,7 @@ class _CustomerShellScreenState extends State {
                               });
                               Navigator.pop(ctx);
                               await _loadPrefsAndData();
-                              _toast('ऑर्डर सफलतापूर्वक दर्ज हो गया!');
+                              _toast('Order placed! • ऑर्डर सफलतापूर्वक दर्ज हो गया');
                             } catch (e) {
                               setModal(() => placing = false);
                               _toast('Order error: $e', isError: true);
@@ -548,8 +749,8 @@ class _CustomerShellScreenState extends State {
                           },
                     child: Text(
                       placing
-                          ? 'ऑर्डर भेजा जा रहा है...'
-                          : 'ऑर्डर करें • Place Order (₹${_cartTotal.toStringAsFixed(0)})',
+                          ? 'Placing Order... • ऑर्डर भेजा जा रहा है'
+                          : 'Place Order (₹${_cartTotal.toStringAsFixed(0)}) • ऑर्डर करें',
                       style: const TextStyle(fontWeight: FontWeight.bold),
                     ),
                   ),
@@ -605,7 +806,7 @@ class _CustomerShellScreenState extends State {
         borderRadius: BorderRadius.circular(14),
         boxShadow: const [
           BoxShadow(
-            color: Color(0x12000000),
+            color: Color(0x14000000),
             blurRadius: 6,
             offset: Offset(0, 2),
           ),
@@ -615,7 +816,6 @@ class _CustomerShellScreenState extends State {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Top Large Image + Red Discount Pill + Heart Icon + Floating Pack Pill
           Expanded(
             flex: 11,
             child: Stack(
@@ -649,15 +849,7 @@ class _CustomerShellScreenState extends State {
                   top: 6,
                   right: 6,
                   child: InkWell(
-                    onTap: () {
-                      setState(() {
-                        if (isFav) {
-                          _favorites.remove(pid);
-                        } else {
-                          _favorites.add(pid);
-                        }
-                      });
-                    },
+                    onTap: () => _toggleFavorite(pid),
                     child: Container(
                       width: 28,
                       height: 28,
@@ -683,81 +875,68 @@ class _CustomerShellScreenState extends State {
                 Positioned(
                   bottom: 6,
                   left: 6,
-                  child: packs.length > 1
-                      ? PopupMenuButton(
-                          onSelected: (val) {
-                            setState(() => _selectedPackIndex[pid] = val);
-                          },
-                          itemBuilder: (_) => List.generate(
-                            packs.length,
-                            (idx) => PopupMenuItem(
-                              value: idx,
-                              child: Text(
-                                '${Map.from(packs[idx] as Map)['label']} - ₹${Map.from(packs[idx] as Map)['price']}',
-                                style: const TextStyle(fontSize: 12.5),
-                              ),
-                            ),
-                          ),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 3,
-                            ),
-                            decoration: BoxDecoration(
-                              color: Colors.white.withValues(alpha: 0.94),
-                              borderRadius: BorderRadius.circular(8),
-                              boxShadow: const [
-                                BoxShadow(
-                                  color: Color(0x1F000000),
-                                  blurRadius: 3,
-                                ),
-                              ],
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text(
-                                  (activePack['label'] ?? '').toString(),
-                                  style: const TextStyle(
-                                    fontSize: 11.5,
-                                    fontWeight: FontWeight.w700,
-                                    color: Colors.black87,
-                                  ),
-                                ),
-                                const SizedBox(width: 2),
-                                const Icon(
-                                  Icons.keyboard_arrow_down,
-                                  size: 15,
-                                  color: Colors.black87,
-                                ),
-                              ],
-                            ),
-                          ),
-                        )
-                      : Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 3,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.94),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 3,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.94),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      (activePack['label'] ?? '').toString(),
+                      style: const TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.black87,
+                      ),
+                    ),
+                  ),
+                ),
+                if (packs.length > 1)
+                  Positioned(
+                    bottom: 6,
+                    right: 6,
+                    child: PopupMenuButton(
+                      onSelected: (val) {
+                        final parsed = int.tryParse(val.toString()) ?? 0;
+                        setState(() => _selectedPackIndex[pid] = parsed);
+                      },
+                      itemBuilder: (_) => List.generate(
+                        packs.length,
+                        (idx) => PopupMenuItem(
+                          value: idx,
                           child: Text(
-                            (activePack['label'] ?? '').toString(),
-                            style: const TextStyle(
-                              fontSize: 11.5,
-                              fontWeight: FontWeight.w700,
-                              color: Colors.black87,
-                            ),
+                            '${Map.from(packs[idx] as Map)['label']} - ₹${Map.from(packs[idx] as Map)['price']}',
+                            style: const TextStyle(fontSize: 12.5),
                           ),
                         ),
-                ),
+                      ),
+                      child: Container(
+                        width: 26,
+                        height: 24,
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.95),
+                          borderRadius: BorderRadius.circular(8),
+                          boxShadow: const [
+                            BoxShadow(
+                              color: Color(0x20000000),
+                              blurRadius: 3,
+                            ),
+                          ],
+                        ),
+                        child: const Icon(
+                          Icons.keyboard_arrow_down,
+                          size: 18,
+                          color: Colors.black87,
+                        ),
+                      ),
+                    ),
+                  ),
               ],
             ),
           ),
-
-          // Details + Price + Add Button
           Padding(
             padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
             child: Column(
@@ -801,24 +980,25 @@ class _CustomerShellScreenState extends State {
                 const SizedBox(height: 7),
                 SizedBox(
                   width: double.infinity,
-                  height: 32,
+                  height: 33,
                   child: ElevatedButton(
                     style: ElevatedButton.styleFrom(
-                      backgroundColor:
-                          inStock ? const Color(0xFF1B7A2B) : Colors.grey.shade400,
+                      backgroundColor: inStock
+                          ? const Color(0xFF1B7A2B)
+                          : Colors.grey.shade400,
                       foregroundColor: Colors.white,
                       elevation: 0,
                       shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(20),
+                        borderRadius: BorderRadius.circular(10),
                       ),
                       padding: EdgeInsets.zero,
                     ),
                     onPressed: inStock ? () => _addToCart(prod) : null,
                     child: Text(
-                      inStock ? 'Add' : 'Out of Stock',
+                      inStock ? 'Add • जोड़ें' : 'Out of Stock',
                       style: const TextStyle(
                         fontWeight: FontWeight.bold,
-                        fontSize: 12.5,
+                        fontSize: 12,
                       ),
                     ),
                   ),
@@ -831,17 +1011,282 @@ class _CustomerShellScreenState extends State {
     );
   }
 
-  Widget _buildHomeTab() {
-    String bannerImg = '';
+  List _effectiveBanners() {
+    String fallbackFruitImg = '';
+    String fallbackGroceryImg = '';
     for (final c in _categories) {
       final m = Map.from(c as Map);
       final url = (m['image_url'] ?? '').toString().trim();
+      final nm = (m['name'] ?? '').toString().toLowerCase();
       if (url.isNotEmpty) {
-        bannerImg = url;
-        if ((m['name'] ?? '').toString().toLowerCase().contains('fruit')) break;
+        if (fallbackFruitImg.isEmpty) fallbackFruitImg = url;
+        if (nm.contains('fruit') || nm.contains('veg')) fallbackFruitImg = url;
+        if (nm.contains('masala') || nm.contains('kirana') || nm.contains('dry')) {
+          fallbackGroceryImg = url;
+        }
       }
     }
+    if (fallbackGroceryImg.isEmpty) fallbackGroceryImg = fallbackFruitImg;
 
+    if (_banners.isNotEmpty) {
+      return _banners.map((b) {
+        final m = Map.from(b as Map);
+        return {
+          'tagline': (m['tagline'] ?? 'Super Saver Deals Are Live!').toString(),
+          'highlight': (m['highlight'] ?? '20% OFF').toString(),
+          'subtitle': (m['subtitle'] ?? 'on fruits & veggies.').toString(),
+          'hindi_subtitle': (m['hindi_subtitle'] ?? 'ताज़े फल और सब्ज़ियां').toString(),
+          'delivery_badge': (m['delivery_badge'] ?? '30 MINUTES!').toString(),
+          'cta_text': (m['cta_text'] ?? 'ORDER NOW').toString(),
+          'cta_hindi': (m['cta_hindi'] ?? 'अभी ऑर्डर करें').toString(),
+          'badge_text': (m['badge_text'] ?? '20% Off').toString(),
+          'image_url': (m['image_url'] ?? '').toString().trim().isNotEmpty
+              ? m['image_url'].toString()
+              : fallbackFruitImg,
+        };
+      }).toList();
+    }
+
+    return [
+      {
+        'tagline': 'Super Saver Deals Are Live!',
+        'highlight': '20% OFF',
+        'subtitle': 'on fruits & veggies.',
+        'hindi_subtitle': 'ताज़े फल और सब्ज़ियां',
+        'delivery_badge': '30 MINUTES!',
+        'cta_text': 'ORDER NOW',
+        'cta_hindi': 'अभी ऑर्डर करें',
+        'badge_text': '20% Off',
+        'image_url': fallbackFruitImg,
+      },
+      {
+        'tagline': 'Daily Kirana & Masala Deals!',
+        'highlight': '25% OFF',
+        'subtitle': 'on rashan & spices.',
+        'hindi_subtitle': 'राशन, दाल और मसाले',
+        'delivery_badge': '30 MINUTES!',
+        'cta_text': 'SHOP NOW',
+        'cta_hindi': 'अभी खरीदें',
+        'badge_text': '25% Off',
+        'image_url': fallbackGroceryImg,
+      },
+    ];
+  }
+
+  Widget _buildOfferBannerCard(Map b) {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 12),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(18),
+        gradient: const LinearGradient(
+          colors: [Color(0xFF0E6B24), Color(0xFF289738), Color(0xFF56B847)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x261B7A2B),
+            blurRadius: 8,
+            offset: Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Stack(
+        children: [
+          Row(
+            children: [
+              Expanded(
+                flex: 6,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      b['tagline'].toString(),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Color(0xFFE8F5E9),
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    const SizedBox(height: 5),
+                    Wrap(
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      spacing: 5,
+                      runSpacing: 2,
+                      children: [
+                        const Text(
+                          'Up to',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 17,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFFD54F),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            b['highlight'].toString(),
+                            style: const TextStyle(
+                              color: Colors.black,
+                              fontSize: 15,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      b['subtitle'].toString(),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 15.5,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    Text(
+                      b['hindi_subtitle'].toString(),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Color(0xFFDCEDC8),
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Row(
+                      children: [
+                        const Text(
+                          'DELIVERED IN ',
+                          style: TextStyle(
+                            color: Colors.black87,
+                            fontSize: 9.5,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 5,
+                            vertical: 1.5,
+                          ),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFFD54F),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            b['delivery_badge'].toString(),
+                            style: const TextStyle(
+                              color: Colors.black,
+                              fontSize: 9.5,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    InkWell(
+                      onTap: () => setState(() {
+                        _selectedCatId = 'all';
+                        _selectedSubCatId = 'all';
+                        _tabIndex = 1;
+                      }),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 5,
+                        ),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFFD54F),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          '${b['cta_text']} • ${b['cta_hindi']}',
+                          style: const TextStyle(
+                            color: Colors.black,
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                flex: 4,
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    Align(
+                      alignment: Alignment.topRight,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 5,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Column(
+                          children: [
+                            const Text(
+                              'DISCOUNT',
+                              style: TextStyle(
+                                fontSize: 7.5,
+                                fontWeight: FontWeight.w800,
+                                color: Colors.black54,
+                              ),
+                            ),
+                            Text(
+                              b['badge_text'].toString(),
+                              style: const TextStyle(
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w900,
+                                color: Color(0xFF1B7A2B),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const Spacer(),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: _netImage(
+                        b['image_url']?.toString(),
+                        width: 96,
+                        height: 88,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHomeTab() {
+    final banners = _effectiveBanners();
     final locationLine = _customerAddress.isNotEmpty
         ? _customerAddress
         : (_savedPincode.isNotEmpty
@@ -854,6 +1299,7 @@ class _CustomerShellScreenState extends State {
       child: ListView(
         padding: EdgeInsets.zero,
         children: [
+          // Top Green Header (Home + Location + Wishlist + Search Bar)
           Container(
             padding: const EdgeInsets.fromLTRB(14, 12, 14, 16),
             decoration: const BoxDecoration(
@@ -867,7 +1313,7 @@ class _CustomerShellScreenState extends State {
                   children: [
                     const Icon(
                       Icons.location_on,
-                      color: Color(0xFFFFD54F),
+                      color: Colors.white,
                       size: 22,
                     ),
                     const SizedBox(width: 8),
@@ -876,11 +1322,11 @@ class _CustomerShellScreenState extends State {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           const Text(
-                            'DEUA FRESH • ताज़ा व तेज़ डिलीवरी',
+                            'DEUA FRESH',
                             style: TextStyle(
-                              color: Color(0xFFFFE082),
-                              fontSize: 11.5,
-                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w900,
                             ),
                           ),
                           Text(
@@ -889,10 +1335,62 @@ class _CustomerShellScreenState extends State {
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
                               color: Colors.white,
-                              fontSize: 15,
-                              fontWeight: FontWeight.w800,
+                              fontSize: 13.5,
+                              fontWeight: FontWeight.w600,
                             ),
                           ),
+                          const Text(
+                            'Delivering fresh in 30 mins • ताज़ा व तेज़ डिलीवरी',
+                            style: TextStyle(
+                              color: Color(0xFFC8E6C9),
+                              fontSize: 10.5,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    InkWell(
+                      onTap: _openWishlistSheet,
+                      child: Stack(
+                        clipBehavior: Clip.none,
+                        children: [
+                          Container(
+                            width: 38,
+                            height: 38,
+                            decoration: const BoxDecoration(
+                              color: Colors.white,
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(
+                              _favorites.isNotEmpty
+                                  ? Icons.favorite
+                                  : Icons.favorite_border,
+                              color: _favorites.isNotEmpty
+                                  ? Colors.red
+                                  : Colors.black54,
+                              size: 20,
+                            ),
+                          ),
+                          if (_favorites.isNotEmpty)
+                            Positioned(
+                              top: -3,
+                              right: -3,
+                              child: Container(
+                                padding: const EdgeInsets.all(4),
+                                decoration: const BoxDecoration(
+                                  color: Color(0xFFE5534B),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: Text(
+                                  '${_favorites.length}',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 9.5,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ),
                         ],
                       ),
                     ),
@@ -906,13 +1404,14 @@ class _CustomerShellScreenState extends State {
                     setState(() {
                       _searchQuery = v.trim();
                       _searchCtrl.text = v.trim();
-                      _showCatSearch = true;
+                      _selectedCatId = 'all';
                       _selectedSubCatId = 'all';
+                      _showCatSearch = true;
                       _tabIndex = 1;
                     });
                   },
                   decoration: InputDecoration(
-                    hintText: 'खोजें: सेब, टमाटर, दाल, मसाले, दूध...',
+                    hintText: 'Search for items... • सामान खोजें',
                     hintStyle:
                         const TextStyle(fontSize: 13.5, color: Colors.black54),
                     prefixIcon:
@@ -930,84 +1429,73 @@ class _CustomerShellScreenState extends State {
             ),
           ),
 
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 14, 12, 6),
-            child: Container(
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: const Color(0xFFEAF6EC),
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'UP TO 25% OFF • भारी छूट',
-                          style: TextStyle(
-                            color: Color(0xFF1B7A2B),
-                            fontSize: 12,
-                            fontWeight: FontWeight.w900,
-                          ),
-                        ),
-                        const SizedBox(height: 6),
-                        const Text(
-                          'फल, सब्ज़ी, किराना, मसाले व डेयरी',
-                          style: TextStyle(
-                            fontSize: 14.5,
-                            fontWeight: FontWeight.w800,
-                            color: Colors.black87,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        const Text(
-                          'Fruits, Veg, Grocery & Dairy',
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.black87,
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        ElevatedButton(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF1B7A2B),
-                            foregroundColor: Colors.white,
-                            shape: const StadiumBorder(),
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 18,
-                              vertical: 10,
-                            ),
-                          ),
-                          onPressed: () => setState(() => _tabIndex = 1),
-                          child: const Text(
-                            'अभी खरीदें • Shop Now',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 13,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: _netImage(bannerImg, width: 92, height: 92),
-                  ),
-                ],
+          const SizedBox(height: 14),
+
+          // Dynamic Offer Banner Carousel
+          SizedBox(
+            height: 174,
+            child: PageView.builder(
+              controller: _bannerCtrl,
+              itemCount: banners.length,
+              onPageChanged: (idx) => setState(() => _bannerPage = idx),
+              itemBuilder: (_, i) =>
+                  _buildOfferBannerCard(Map.from(banners[i] as Map)),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: List.generate(
+              banners.length,
+              (idx) => Container(
+                margin: const EdgeInsets.symmetric(horizontal: 3),
+                width: _bannerPage == idx ? 10 : 7,
+                height: _bannerPage == idx ? 10 : 7,
+                decoration: BoxDecoration(
+                  color: _bannerPage == idx
+                      ? const Color(0xFF1B7A2B)
+                      : Colors.grey.shade400,
+                  shape: BoxShape.circle,
+                ),
               ),
             ),
           ),
 
-          const Padding(
-            padding: EdgeInsets.fromLTRB(14, 12, 14, 8),
-            child: Text(
-              'सभी श्रेणियां • Shop by Category',
-              style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900),
+          // Shop by Category (3-column grid, bold English top + small Hindi bottom)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 14, 14, 8),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Shop by Category',
+                      style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900),
+                    ),
+                    Text(
+                      'सभी श्रेणियां',
+                      style: TextStyle(fontSize: 11.5, color: Colors.black54),
+                    ),
+                  ],
+                ),
+                InkWell(
+                  onTap: () => setState(() {
+                    _selectedCatId = 'all';
+                    _selectedSubCatId = 'all';
+                    _tabIndex = 1;
+                  }),
+                  child: const Text(
+                    'View All ->',
+                    style: TextStyle(
+                      color: Color(0xFF1B7A2B),
+                      fontWeight: FontWeight.w800,
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
           GridView.builder(
@@ -1024,8 +1512,8 @@ class _CustomerShellScreenState extends State {
             itemBuilder: (_, i) {
               final cat = Map.from(_categories[i] as Map);
               final cid = cat['id'].toString();
-              final hindi = (cat['hindi_name'] ?? '').toString();
               final eng = (cat['name'] ?? '').toString();
+              final hindi = (cat['hindi_name'] ?? '').toString();
 
               return InkWell(
                 borderRadius: BorderRadius.circular(12),
@@ -1064,23 +1552,23 @@ class _CustomerShellScreenState extends State {
                       ),
                       const SizedBox(height: 5),
                       Text(
-                        hindi.isNotEmpty ? hindi : eng,
+                        eng.isNotEmpty ? eng : hindi,
                         textAlign: TextAlign.center,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
                           fontSize: 11.5,
-                          fontWeight: FontWeight.bold,
+                          fontWeight: FontWeight.w800,
                         ),
                       ),
-                      if (eng.isNotEmpty && hindi.isNotEmpty)
+                      if (hindi.isNotEmpty && eng.isNotEmpty)
                         Text(
-                          eng,
+                          hindi,
                           textAlign: TextAlign.center,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
-                            fontSize: 10,
+                            fontSize: 9.5,
                             color: Colors.black54,
                           ),
                         ),
@@ -1091,11 +1579,41 @@ class _CustomerShellScreenState extends State {
             },
           ),
 
-          const Padding(
-            padding: EdgeInsets.fromLTRB(14, 16, 14, 8),
-            child: Text(
-              'लोकप्रिय सामान • Popular Items',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+          // Today's Hot Deals / Popular Items
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 16, 14, 8),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      "Today's Hot Deals",
+                      style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900),
+                    ),
+                    Text(
+                      'लोकप्रिय सामान और ऑफ़र',
+                      style: TextStyle(fontSize: 11.5, color: Colors.black54),
+                    ),
+                  ],
+                ),
+                InkWell(
+                  onTap: () => setState(() {
+                    _selectedCatId = 'all';
+                    _selectedSubCatId = 'all';
+                    _tabIndex = 1;
+                  }),
+                  child: const Text(
+                    'View All ->',
+                    style: TextStyle(
+                      color: Color(0xFF1B7A2B),
+                      fontWeight: FontWeight.w800,
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
           GridView.builder(
@@ -1105,7 +1623,7 @@ class _CustomerShellScreenState extends State {
             itemCount: _products.length,
             gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: 2,
-              childAspectRatio: 0.62,
+              childAspectRatio: 0.58,
               crossAxisSpacing: 10,
               mainAxisSpacing: 10,
             ),
@@ -1119,20 +1637,33 @@ class _CustomerShellScreenState extends State {
 
   Widget _buildCategoriesTab() {
     final q = _searchQuery.trim().toLowerCase();
-    final activeSubCats = _subCategories
-        .map((s) => Map.from(s as Map))
-        .where((s) => (s['main_category_id'] ?? '').toString() == _selectedCatId)
-        .toList();
 
-    final hasSubCats = activeSubCats.isNotEmpty;
+    String headerEng = 'All Categories';
+    String headerHindi = 'सभी श्रेणियां';
+    for (final c in _categories) {
+      final m = Map.from(c as Map);
+      if (m['id'].toString() == _selectedCatId) {
+        headerEng = (m['name'] ?? 'Categories').toString();
+        headerHindi = (m['hindi_name'] ?? '').toString();
+        break;
+      }
+    }
+
+    final activeSubCats = _selectedCatId == 'all'
+        ? []
+        : _subCategories
+            .map((s) => Map.from(s as Map))
+            .where((s) =>
+                (s['main_category_id'] ?? '').toString() == _selectedCatId)
+            .toList();
 
     final catProducts = _products
         .map((p) => Map.from(p as Map))
         .where((p) {
-          final matchesCat = _selectedCatId.isEmpty ||
+          final matchesCat = _selectedCatId == 'all' ||
               (p['main_category_id'] ?? '').toString() == _selectedCatId;
-          final matchesSubCat = !hasSubCats ||
-              _selectedSubCatId == 'all' ||
+          final matchesSubCat = _selectedSubCatId == 'all' ||
+              activeSubCats.isEmpty ||
               (p['sub_category_id'] ?? '').toString() == _selectedSubCatId;
           final matchesSearch =
               q.isEmpty || (p['name'] ?? '').toString().toLowerCase().contains(q);
@@ -1140,29 +1671,72 @@ class _CustomerShellScreenState extends State {
         })
         .toList();
 
+    final firstCatImg = _categories.isNotEmpty
+        ? Map.from(_categories.first as Map)['image_url']?.toString()
+        : '';
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Top Header + Search Toggle + Horizontal Main Category Pills
+        // Clean Top Bar: Back Button + Selected Category (Bold Eng + Small Hindi) + Search Icon
         Container(
           width: double.infinity,
           color: Colors.white,
-          padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+          padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text(
-                    'सभी श्रेणियां • All Categories',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+                  InkWell(
+                    borderRadius: BorderRadius.circular(20),
+                    onTap: () => setState(() => _tabIndex = 0),
+                    child: Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade100,
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Icons.arrow_back,
+                        size: 20,
+                        color: Colors.black87,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          headerEng,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w800,
+                            color: Colors.black87,
+                          ),
+                        ),
+                        if (headerHindi.isNotEmpty)
+                          Text(
+                            headerHindi,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 11.5,
+                              color: Colors.black54,
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
                   IconButton(
-                    visualDensity: VisualDensity.compact,
                     icon: Icon(
                       _showCatSearch ? Icons.close : Icons.search,
                       color: const Color(0xFF1B7A2B),
+                      size: 24,
                     ),
                     onPressed: () {
                       setState(() {
@@ -1177,12 +1751,12 @@ class _CustomerShellScreenState extends State {
                 ],
               ),
               if (_showCatSearch) ...[
-                const SizedBox(height: 6),
+                const SizedBox(height: 8),
                 TextField(
                   controller: _searchCtrl,
                   onChanged: (v) => setState(() => _searchQuery = v),
                   decoration: InputDecoration(
-                    hintText: 'सामान खोजें • Search items...',
+                    hintText: 'Search items... • सामान खोजें',
                     prefixIcon: const Icon(
                       Icons.search,
                       color: Color(0xFF1B7A2B),
@@ -1196,308 +1770,221 @@ class _CustomerShellScreenState extends State {
                   ),
                 ),
               ],
-              const SizedBox(height: 8),
-              SizedBox(
-                height: 40,
-                child: ListView.builder(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: _categories.length,
-                  itemBuilder: (_, i) {
-                    final cat = Map.from(_categories[i] as Map);
-                    final cid = cat['id'].toString();
-                    final sel = cid == _selectedCatId;
-                    final hindi = (cat['hindi_name'] ?? '').toString();
-                    final eng = (cat['name'] ?? '').toString();
-                    final label = hindi.isNotEmpty && eng.isNotEmpty
-                        ? '$hindi ($eng)'
-                        : (hindi.isNotEmpty ? hindi : eng);
+            ],
+          ),
+        ),
+        const Divider(height: 1),
 
-                    return Padding(
-                      padding: const EdgeInsets.only(right: 8),
-                      child: InkWell(
-                        borderRadius: BorderRadius.circular(12),
+        // Left Sidebar (All Main Categories) + Right 2-Column Product Grid
+        Expanded(
+          child: Row(
+            children: [
+              SizedBox(
+                width: 88,
+                child: Container(
+                  color: Colors.white,
+                  child: ListView.builder(
+                    itemCount: _categories.length + 1,
+                    itemBuilder: (_, i) {
+                      final isAll = i == 0;
+                      final cat = isAll ? {} : Map.from(_categories[i - 1] as Map);
+                      final cid = isAll ? 'all' : cat['id'].toString();
+                      final sel = cid == _selectedCatId;
+                      final eng = isAll ? 'All' : (cat['name'] ?? '').toString();
+                      final hindi =
+                          isAll ? 'सभी' : (cat['hindi_name'] ?? '').toString();
+                      final img = isAll
+                          ? firstCatImg
+                          : cat['image_url']?.toString();
+                      final count = isAll
+                          ? _products.length
+                          : _products
+                              .where((p) =>
+                                  (Map.from(p as Map)['main_category_id'] ?? '')
+                                      .toString() ==
+                                  cid)
+                              .length;
+
+                      return InkWell(
                         onTap: () => setState(() {
                           _selectedCatId = cid;
                           _selectedSubCatId = 'all';
                         }),
                         child: Container(
                           padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 5,
+                            vertical: 10,
+                            horizontal: 5,
                           ),
                           decoration: BoxDecoration(
                             color: sel ? const Color(0xFFE8F5E9) : Colors.white,
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(
-                              color: sel
-                                  ? const Color(0xFF1B7A2B)
-                                  : Colors.grey.shade300,
-                              width: sel ? 1.4 : 1,
+                            border: Border(
+                              right: BorderSide(
+                                color: sel
+                                    ? const Color(0xFF1B7A2B)
+                                    : Colors.transparent,
+                                width: 3.5,
+                              ),
                             ),
                           ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
+                          child: Column(
                             children: [
-                              ClipOval(
-                                child: _netImage(
-                                  cat['image_url']?.toString(),
-                                  width: 24,
-                                  height: 24,
+                              Container(
+                                padding: const EdgeInsets.all(2),
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  border: Border.all(
+                                    color: sel
+                                        ? const Color(0xFF1B7A2B)
+                                        : Colors.grey.shade200,
+                                    width: sel ? 2 : 1,
+                                  ),
+                                ),
+                                child: ClipOval(
+                                  child: _netImage(img, width: 44, height: 44),
                                 ),
                               ),
-                              const SizedBox(width: 7),
+                              const SizedBox(height: 5),
                               Text(
-                                label,
+                                eng.isNotEmpty ? eng : hindi,
+                                textAlign: TextAlign.center,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
                                 style: TextStyle(
-                                  fontSize: 12.5,
+                                  fontSize: 10.5,
                                   fontWeight:
-                                      sel ? FontWeight.w800 : FontWeight.w600,
-                                  color: Colors.black87,
+                                      sel ? FontWeight.w800 : FontWeight.w700,
+                                  color: sel
+                                      ? const Color(0xFF1B7A2B)
+                                      : Colors.black87,
+                                  height: 1.15,
+                                ),
+                              ),
+                              if (hindi.isNotEmpty) ...[
+                                const SizedBox(height: 2),
+                                Text(
+                                  hindi,
+                                  textAlign: TextAlign.center,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontSize: 9,
+                                    color: Colors.black54,
+                                  ),
+                                ),
+                              ],
+                              const SizedBox(height: 4),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 7,
+                                  vertical: 1.5,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: sel
+                                      ? Colors.white
+                                      : Colors.grey.shade100,
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Text(
+                                  '$count',
+                                  style: TextStyle(
+                                    fontSize: 9.5,
+                                    color: sel
+                                        ? const Color(0xFF1B7A2B)
+                                        : Colors.black54,
+                                    fontWeight: FontWeight.bold,
+                                  ),
                                 ),
                               ),
                             ],
                           ),
                         ),
-                      ),
-                    );
-                  },
-                ),
-              ),
-            ],
-          ),
-        ),
-        const Divider(height: 1),
-
-        // Left Sidebar + Right Product Grid
-        Expanded(
-          child: Row(
-            children: [
-              SizedBox(
-                width: 90,
-                child: Container(
-                  color: Colors.white,
-                  child: hasSubCats
-                      ? ListView.builder(
-                          itemCount: activeSubCats.length + 1,
-                          itemBuilder: (_, i) {
-                            final isAll = i == 0;
-                            final sid = isAll
-                                ? 'all'
-                                : activeSubCats[i - 1]['id'].toString();
-                            final sel = _selectedSubCatId == sid;
-                            final title = isAll
-                                ? 'सभी आइटम\n(All)'
-                                : (activeSubCats[i - 1]['name'] ?? '')
-                                    .toString();
-                            final img = isAll
-                                ? (_categories.isNotEmpty
-                                    ? Map.from(_categories.first as Map)['image_url']
-                                        ?.toString()
-                                    : '')
-                                : activeSubCats[i - 1]['image_url']?.toString();
-
-                            final count = isAll
-                                ? _products
-                                    .where((p) =>
-                                        (Map.from(p as Map)['main_category_id'] ??
-                                                '')
-                                            .toString() ==
-                                        _selectedCatId)
-                                    .length
-                                : _products
-                                    .where((p) =>
-                                        (Map.from(p as Map)['sub_category_id'] ??
-                                                '')
-                                            .toString() ==
-                                        sid)
-                                    .length;
-
-                            return InkWell(
-                              onTap: () =>
-                                  setState(() => _selectedSubCatId = sid),
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: 10,
-                                  horizontal: 6,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: sel
-                                      ? const Color(0xFFE8F5E9)
-                                      : Colors.white,
-                                  border: Border(
-                                    right: BorderSide(
-                                      color: sel
-                                          ? const Color(0xFF1B7A2B)
-                                          : Colors.transparent,
-                                      width: 3.5,
-                                    ),
-                                  ),
-                                ),
-                                child: Column(
-                                  children: [
-                                    Container(
-                                      padding: const EdgeInsets.all(2),
-                                      decoration: BoxDecoration(
-                                        shape: BoxShape.circle,
-                                        border: Border.all(
-                                          color: sel
-                                              ? const Color(0xFF1B7A2B)
-                                              : Colors.grey.shade200,
-                                          width: sel ? 2 : 1,
-                                        ),
-                                      ),
-                                      child: ClipOval(
-                                        child: _netImage(
-                                          img,
-                                          width: 44,
-                                          height: 44,
-                                        ),
-                                      ),
-                                    ),
-                                    const SizedBox(height: 5),
-                                    Text(
-                                      title,
-                                      textAlign: TextAlign.center,
-                                      maxLines: 2,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(
-                                        fontSize: 10.5,
-                                        fontWeight: sel
-                                            ? FontWeight.w800
-                                            : FontWeight.w600,
-                                        color: sel
-                                            ? const Color(0xFF1B7A2B)
-                                            : Colors.black87,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 3),
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 6,
-                                        vertical: 1,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        color: Colors.grey.shade100,
-                                        borderRadius: BorderRadius.circular(8),
-                                      ),
-                                      child: Text(
-                                        '$count',
-                                        style: const TextStyle(
-                                          fontSize: 9.5,
-                                          color: Colors.black54,
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            );
-                          },
-                        )
-                      : ListView.builder(
-                          itemCount: _categories.length,
-                          itemBuilder: (_, i) {
-                            final cat = Map.from(_categories[i] as Map);
-                            final cid = cat['id'].toString();
-                            final sel = cid == _selectedCatId;
-                            final hindi = (cat['hindi_name'] ?? '').toString();
-                            final eng = (cat['name'] ?? '').toString();
-                            final count = _products
-                                .where((p) =>
-                                    (Map.from(p as Map)['main_category_id'] ??
-                                            '')
-                                        .toString() ==
-                                    cid)
-                                .length;
-
-                            return InkWell(
-                              onTap: () => setState(() {
-                                _selectedCatId = cid;
-                                _selectedSubCatId = 'all';
-                              }),
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: 10,
-                                  horizontal: 6,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: sel
-                                      ? const Color(0xFFE8F5E9)
-                                      : Colors.white,
-                                  border: Border(
-                                    right: BorderSide(
-                                      color: sel
-                                          ? const Color(0xFF1B7A2B)
-                                          : Colors.transparent,
-                                      width: 3.5,
-                                    ),
-                                  ),
-                                ),
-                                child: Column(
-                                  children: [
-                                    ClipOval(
-                                      child: _netImage(
-                                        cat['image_url']?.toString(),
-                                        width: 44,
-                                        height: 44,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 5),
-                                    Text(
-                                      hindi.isNotEmpty ? hindi : eng,
-                                      textAlign: TextAlign.center,
-                                      maxLines: 2,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(
-                                        fontSize: 10.5,
-                                        fontWeight: sel
-                                            ? FontWeight.w800
-                                            : FontWeight.w600,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 2),
-                                    Text(
-                                      '$count',
-                                      style: const TextStyle(
-                                        fontSize: 9.5,
-                                        color: Color(0xFF1B7A2B),
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            );
-                          },
-                        ),
+                      );
+                    },
+                  ),
                 ),
               ),
               Expanded(
-                child: RefreshIndicator(
-                  onRefresh: _loadPrefsAndData,
-                  color: const Color(0xFF1B7A2B),
-                  child: catProducts.isEmpty
-                      ? ListView(
-                          children: const [
-                            SizedBox(height: 120),
-                            Center(
-                              child: Text('इस श्रेणी में अभी सामान नहीं है।'),
+                child: Column(
+                  children: [
+                    if (activeSubCats.isNotEmpty)
+                      Container(
+                        height: 40,
+                        color: const Color(0xFFF6F8F6),
+                        padding: const EdgeInsets.fromLTRB(8, 6, 8, 2),
+                        child: ListView(
+                          scrollDirection: Axis.horizontal,
+                          children: [
+                            Padding(
+                              padding: const EdgeInsets.only(right: 6),
+                              child: ChoiceChip(
+                                label: const Text('All • सभी'),
+                                selected: _selectedSubCatId == 'all',
+                                selectedColor: const Color(0xFF1B7A2B),
+                                labelStyle: TextStyle(
+                                  color: _selectedSubCatId == 'all'
+                                      ? Colors.white
+                                      : Colors.black87,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                                onSelected: (_) =>
+                                    setState(() => _selectedSubCatId = 'all'),
+                              ),
                             ),
+                            ...activeSubCats.map((sc) {
+                              final sid = sc['id'].toString();
+                              final sel = _selectedSubCatId == sid;
+                              return Padding(
+                                padding: const EdgeInsets.only(right: 6),
+                                child: ChoiceChip(
+                                  label: Text((sc['name'] ?? '').toString()),
+                                  selected: sel,
+                                  selectedColor: const Color(0xFF1B7A2B),
+                                  labelStyle: TextStyle(
+                                    color: sel ? Colors.white : Colors.black87,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                  onSelected: (_) =>
+                                      setState(() => _selectedSubCatId = sid),
+                                ),
+                              );
+                            }),
                           ],
-                        )
-                      : GridView.builder(
-                          padding: const EdgeInsets.all(8),
-                          itemCount: catProducts.length,
-                          gridDelegate:
-                              const SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: 2,
-                            childAspectRatio: 0.56,
-                            crossAxisSpacing: 8,
-                            mainAxisSpacing: 8,
-                          ),
-                          itemBuilder: (_, i) => _buildProductCard(catProducts[i]),
                         ),
+                      ),
+                    Expanded(
+                      child: RefreshIndicator(
+                        onRefresh: _loadPrefsAndData,
+                        color: const Color(0xFF1B7A2B),
+                        child: catProducts.isEmpty
+                            ? ListView(
+                                children: const [
+                                  SizedBox(height: 120),
+                                  Center(
+                                    child: Text(
+                                      'No items in this category\nइस श्रेणी में अभी सामान नहीं है',
+                                      textAlign: TextAlign.center,
+                                    ),
+                                  ),
+                                ],
+                              )
+                            : GridView.builder(
+                                padding: const EdgeInsets.all(8),
+                                itemCount: catProducts.length,
+                                gridDelegate:
+                                    const SliverGridDelegateWithFixedCrossAxisCount(
+                                  crossAxisCount: 2,
+                                  childAspectRatio: 0.56,
+                                  crossAxisSpacing: 8,
+                                  mainAxisSpacing: 8,
+                                ),
+                                itemBuilder: (_, i) =>
+                                    _buildProductCard(catProducts[i]),
+                              ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],
@@ -1515,7 +2002,12 @@ class _CustomerShellScreenState extends State {
           ? ListView(
               children: const [
                 SizedBox(height: 120),
-                Center(child: Text('अभी कोई ऑर्डर नहीं मिला है।')),
+                Center(
+                  child: Text(
+                    'No orders yet\nअभी कोई ऑर्डर नहीं मिला है',
+                    textAlign: TextAlign.center,
+                  ),
+                ),
               ],
             )
           : ListView.builder(
@@ -1531,6 +2023,9 @@ class _CustomerShellScreenState extends State {
                 return Card(
                   color: Colors.white,
                   margin: const EdgeInsets.only(bottom: 10),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
                   child: Padding(
                     padding: const EdgeInsets.all(12),
                     child: Column(
@@ -1539,26 +2034,79 @@ class _CustomerShellScreenState extends State {
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Text(
-                              'Order • $status',
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                                color: Color(0xFF1B7A2B),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 3,
+                              ),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFE8F5E9),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Text(
+                                status,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 12,
+                                  color: Color(0xFF1B7A2B),
+                                ),
                               ),
                             ),
                             Text(
                               '₹$total',
                               style: const TextStyle(
                                 fontWeight: FontWeight.w900,
-                                fontSize: 15,
+                                fontSize: 16,
                               ),
                             ),
                           ],
                         ),
-                        const SizedBox(height: 4),
+                        const SizedBox(height: 8),
                         Text(
                           'Items: ${items.length} • ${ord['payment_method'] ?? 'COD'}',
-                          style: const TextStyle(fontSize: 12.5),
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        if (items.isNotEmpty) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            items
+                                .take(3)
+                                .map((it) =>
+                                    '${Map.from(it as Map)['name']} (${Map.from(it)['qty']}x)')
+                                .join(', '),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: Colors.black54,
+                            ),
+                          ),
+                        ],
+                        const SizedBox(height: 10),
+                        SizedBox(
+                          width: double.infinity,
+                          height: 36,
+                          child: OutlinedButton.icon(
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: const Color(0xFF1B7A2B),
+                              side: const BorderSide(color: Color(0xFF1B7A2B)),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                            ),
+                            onPressed: () => _reorderItems(ord),
+                            icon: const Icon(Icons.refresh, size: 17),
+                            label: const Text(
+                              'Re-order • फिर से ऑर्डर करें',
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 12.5,
+                              ),
+                            ),
+                          ),
                         ),
                       ],
                     ),
@@ -1570,16 +2118,14 @@ class _CustomerShellScreenState extends State {
   }
 
   Widget _buildProfileTab() {
-    final nameCtrl = TextEditingController(text: _customerName);
-    final phoneCtrl = TextEditingController(text: _customerPhone);
-    final addrCtrl = TextEditingController(text: _customerAddress);
-    final pinCtrl = TextEditingController(text: _savedPincode);
-
     return ListView(
       padding: const EdgeInsets.all(14),
       children: [
         Card(
           color: Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
           child: Padding(
             padding: const EdgeInsets.all(14),
             child: Column(
@@ -1587,33 +2133,37 @@ class _CustomerShellScreenState extends State {
               children: [
                 const Text(
                   'Customer Details',
-                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
                 ),
-                const SizedBox(height: 8),
+                const Text(
+                  'ग्राहक की जानकारी',
+                  style: TextStyle(fontSize: 11.5, color: Colors.black54),
+                ),
+                const SizedBox(height: 10),
                 TextField(
-                  controller: nameCtrl,
+                  controller: _profileNameCtrl,
                   decoration: const InputDecoration(
-                    labelText: 'नाम • Name',
+                    labelText: 'Name • नाम',
                     border: OutlineInputBorder(),
                     isDense: true,
                   ),
                 ),
                 const SizedBox(height: 8),
                 TextField(
-                  controller: phoneCtrl,
+                  controller: _profilePhoneCtrl,
                   keyboardType: TextInputType.phone,
                   decoration: const InputDecoration(
-                    labelText: 'मोबाइल नंबर • Phone',
+                    labelText: 'Phone • मोबाइल नंबर',
                     border: OutlineInputBorder(),
                     isDense: true,
                   ),
                 ),
                 const SizedBox(height: 8),
                 TextField(
-                  controller: addrCtrl,
+                  controller: _profileAddrCtrl,
                   maxLines: 2,
                   decoration: const InputDecoration(
-                    labelText: 'पता • Address',
+                    labelText: 'Address • पता',
                     border: OutlineInputBorder(),
                     isDense: true,
                   ),
@@ -1623,7 +2173,7 @@ class _CustomerShellScreenState extends State {
                   children: [
                     Expanded(
                       child: TextField(
-                        controller: pinCtrl,
+                        controller: _profilePinCtrl,
                         keyboardType: TextInputType.number,
                         maxLength: 6,
                         decoration: const InputDecoration(
@@ -1639,7 +2189,7 @@ class _CustomerShellScreenState extends State {
                         backgroundColor: const Color(0xFF1B7A2B),
                         foregroundColor: Colors.white,
                       ),
-                      onPressed: () => _checkPincode(pinCtrl.text),
+                      onPressed: () => _checkPincode(_profilePinCtrl.text),
                       child: const Text('Check PIN'),
                     ),
                   ],
@@ -1649,12 +2199,12 @@ class _CustomerShellScreenState extends State {
                   width: double.infinity,
                   child: OutlinedButton(
                     onPressed: () => _saveProfileDetails(
-                      name: nameCtrl.text,
-                      phone: phoneCtrl.text,
-                      address: addrCtrl.text,
-                      pincode: pinCtrl.text,
+                      name: _profileNameCtrl.text,
+                      phone: _profilePhoneCtrl.text,
+                      address: _profileAddrCtrl.text,
+                      pincode: _profilePinCtrl.text,
                     ),
-                    child: const Text('Save Profile'),
+                    child: const Text('Save Profile • सेव करें'),
                   ),
                 ),
               ],
@@ -1664,6 +2214,23 @@ class _CustomerShellScreenState extends State {
         const SizedBox(height: 10),
         Card(
           color: Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: ListTile(
+            leading: const Icon(Icons.favorite, color: Colors.red),
+            title: Text('Saved Wishlist (${_favorites.length})'),
+            subtitle: const Text('पसंदीदा सामान देखें'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: _openWishlistSheet,
+          ),
+        ),
+        const SizedBox(height: 10),
+        Card(
+          color: Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
           child: ListTile(
             leading: const Icon(
               Icons.shopping_cart_outlined,
@@ -1677,7 +2244,7 @@ class _CustomerShellScreenState extends State {
                 foregroundColor: Colors.white,
               ),
               onPressed: _openCartAndCheckout,
-              child: const Text('Cart / Checkout'),
+              child: const Text('Checkout'),
             ),
           ),
         ),
