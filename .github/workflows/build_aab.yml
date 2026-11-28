@@ -25,25 +25,64 @@ jobs:
         with:
           channel: 'stable'
 
+      - name: Generate Android files
+        run: flutter create --platforms=android --org com.deuafresh --project-name deua_customer .
+
+      - name: Add Internet Permission
+        run: |
+          python3 -c '
+          p = "android/app/src/main/AndroidManifest.xml"
+          s = open(p).read()
+          perm = "<uses-permission android:name=\"android.permission.INTERNET\"/>"
+          if perm not in s:
+              s = s.replace("<application", perm + "\n    <application", 1)
+              open(p, "w").write(s)
+          '
+
+      - name: Generate Release Signing Key
+        run: |
+          keytool -genkey -v \
+            -keystore android/app/upload-keystore.jks \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -alias upload \
+            -storepass DeuaFresh@2026 \
+            -keypass DeuaFresh@2026 \
+            -dname "CN=DEUA FRESH, OU=App, O=DEUA FRESH, L=Deua, ST=Bihar, C=IN"
+
+      - name: Configure Release Signing
+        run: |
+          python3 -c '
+          p = "android/app/build.gradle.kts"
+          s = open(p).read()
+          signing_block = """    signingConfigs {
+                  create("release") {
+                      keyAlias = "upload"
+                      keyPassword = "DeuaFresh@2026"
+                      storeFile = file("upload-keystore.jks")
+                      storePassword = "DeuaFresh@2026"
+                  }
+              }
+
+              buildTypes {"""
+          s = s.replace("    buildTypes {", signing_block, 1)
+          s = s.replace("signingConfig = signingConfigs.getByName(\"debug\")", "signingConfig = signingConfigs.getByName(\"release\")")
+          open(p, "w").write(s)
+          '
+
       - name: Get dependencies
         run: flutter pub get
 
-      - name: Decode release keystore
-        if: ${{ secrets.KEYSTORE_BASE64 != '' }}
-        run: |
-          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > android/app/upload-keystore.jks
-          cat << 'EOF' > android/key.properties
-          storePassword=${{ secrets.STORE_PASSWORD }}
-          keyPassword=${{ secrets.KEY_PASSWORD }}
-          keyAlias=${{ secrets.KEY_ALIAS }}
-          storeFile=upload-keystore.jks
-          EOF
-
-      - name: Build AAB
+      - name: Build Signed AAB
         run: flutter build appbundle --release
 
       - name: Upload AAB Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: DEUA-Customer-AAB
+          name: DEUA-Customer-PlayStore-AAB
           path: build/app/outputs/bundle/release/app-release.aab
+
+      - name: Upload Signing Key (Save in Google Drive)
+        uses: actions/upload-artifact@v4
+        with:
+          name: DEUA-Signing-Key-SAFE-RAKHEIN
+          path: android/app/upload-keystore.jks
