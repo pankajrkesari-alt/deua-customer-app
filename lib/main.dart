@@ -47,7 +47,7 @@ class CustomerShellScreen extends StatefulWidget {
 class _CustomerShellScreenState extends State<CustomerShellScreen> {
   final _supabase = Supabase.instance.client;
 
-  int _tabIndex = 1; // 0: Home, 1: Categories (Left Sidebar), 2: Orders, 3: Profile
+  int _tabIndex = 1;
   bool _loading = true;
   String? _error;
 
@@ -180,7 +180,8 @@ class _CustomerShellScreenState extends State<CustomerShellScreen> {
     }
     final pid = prod['id'].toString();
     final packs = _packsOf(prod);
-    final pIdx = (_selectedPackIndex[pid] ?? 0).clamp(0, packs.length - 1);
+    final int pIdx =
+        (_selectedPackIndex[pid] ?? 0).clamp(0, packs.length - 1).toInt();
     final pack = packs[pIdx];
     final key = '${pid}_$pIdx';
 
@@ -189,7 +190,7 @@ class _CustomerShellScreenState extends State<CustomerShellScreen> {
 
     setState(() {
       if (_cart.containsKey(key)) {
-        _cart[key]!['qty'] = (_cart[key]!['qty'] as int) + 1;
+        _cart[key]!['qty'] = ((_cart[key]!['qty'] as num?)?.toInt() ?? 1) + 1;
       } else {
         _cart[key] = {
           'product_id': pid,
@@ -207,7 +208,7 @@ class _CustomerShellScreenState extends State<CustomerShellScreen> {
   void _changeCartQty(String key, int delta) {
     setState(() {
       if (!_cart.containsKey(key)) return;
-      final nextQty = ((_cart[key]!['qty'] as int?) ?? 1) + delta;
+      final nextQty = ((_cart[key]!['qty'] as num?)?.toInt() ?? 1) + delta;
       if (nextQty <= 0) {
         _cart.remove(key);
       } else {
@@ -285,9 +286,13 @@ class _CustomerShellScreenState extends State<CustomerShellScreen> {
 
       if (activeRow.isNotEmpty) {
         final area = (activeRow.first['area_name'] ?? '').toString();
-        _toast('Delivery available in $clean ${area.isNotEmpty ? "($area)" : ""}');
+        _toast(
+            'Delivery available in $clean ${area.isNotEmpty ? "($area)" : ""}');
       } else {
-        _toast('Is PIN par abhi delivery active nahi hai, lekin PIN save ho gaya.', isError: true);
+        _toast(
+          'Is PIN par abhi delivery active nahi hai, lekin PIN save ho gaya.',
+          isError: true,
+        );
       }
     } catch (_) {
       final prefs = await SharedPreferences.getInstance();
@@ -333,7 +338,10 @@ class _CustomerShellScreenState extends State<CustomerShellScreen> {
                   children: [
                     Text(
                       'Cart ($_cartCount) • Checkout',
-                      style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+                      style: const TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                     Text(
                       '₹${_cartTotal.toStringAsFixed(0)}',
@@ -358,23 +366,36 @@ class _CustomerShellScreenState extends State<CustomerShellScreen> {
                       dense: true,
                       title: Text(
                         '${item['name']} (${item['pack']})',
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 13,
+                        ),
                       ),
                       subtitle: Text('₹${(price * qty).toStringAsFixed(0)}'),
                       trailing: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           IconButton(
-                            icon: const Icon(Icons.remove_circle_outline, size: 20),
+                            icon: const Icon(
+                              Icons.remove_circle_outline,
+                              size: 20,
+                            ),
                             onPressed: () {
                               _changeCartQty(key, -1);
                               setModal(() {});
                               if (_cart.isEmpty) Navigator.pop(ctx);
                             },
                           ),
-                          Text('$qty', style: const TextStyle(fontWeight: FontWeight.bold)),
+                          Text(
+                            '$qty',
+                            style: const TextStyle(fontWeight: FontWeight.bold),
+                          ),
                           IconButton(
-                            icon: const Icon(Icons.add_circle_outline, size: 20, color: Color(0xFF1B7A2B)),
+                            icon: const Icon(
+                              Icons.add_circle_outline,
+                              size: 20,
+                              color: Color(0xFF1B7A2B),
+                            ),
                             onPressed: () {
                               _changeCartQty(key, 1);
                               setModal(() {});
@@ -427,14 +448,17 @@ class _CustomerShellScreenState extends State<CustomerShellScreen> {
                 ),
                 const SizedBox(height: 10),
                 DropdownButtonFormField<String>(
-                  value: paymentMethod,
+                  initialValue: paymentMethod,
                   decoration: const InputDecoration(
                     labelText: 'Payment Method',
                     border: OutlineInputBorder(),
                     isDense: true,
                   ),
                   items: const [
-                    DropdownMenuItem(value: 'COD', child: Text('Cash on Delivery (COD)')),
+                    DropdownMenuItem(
+                      value: 'COD',
+                      child: Text('Cash on Delivery (COD)'),
+                    ),
                     DropdownMenuItem(value: 'UPI', child: Text('UPI')),
                   ],
                   onChanged: (v) {
@@ -458,7 +482,10 @@ class _CustomerShellScreenState extends State<CustomerShellScreen> {
                             final ad = addrCtrl.text.trim();
                             final pn = pinCtrl.text.trim();
                             if (nm.isEmpty || ph.length < 8 || ad.isEmpty) {
-                              _toast('नाम, मोबाइल नंबर और पता ज़रूर भरें।', isError: true);
+                              _toast(
+                                'नाम, मोबाइल नंबर और पता ज़रूर भरें।',
+                                isError: true,
+                              );
                               return;
                             }
                             setModal(() => placing = true);
@@ -467,14 +494,16 @@ class _CustomerShellScreenState extends State<CustomerShellScreen> {
                               await _supabase.from('deua_orders').insert({
                                 'customer_name': nm,
                                 'customer_phone': ph,
-                                'delivery_address': pn.isNotEmpty ? '$ad (PIN: $pn)' : ad,
+                                'delivery_address':
+                                    pn.isNotEmpty ? '$ad (PIN: $pn)' : ad,
                                 'items': itemsList,
                                 'total_amount': _cartTotal,
                                 'payment_method': paymentMethod,
                                 'status': 'Pending',
                               });
 
-                              final prefs = await SharedPreferences.getInstance();
+                              final prefs =
+                                  await SharedPreferences.getInstance();
                               await prefs.setString('deua_cust_name', nm);
                               await prefs.setString('deua_cust_phone', ph);
                               await prefs.setString('deua_cust_addr', ad);
@@ -500,7 +529,9 @@ class _CustomerShellScreenState extends State<CustomerShellScreen> {
                             }
                           },
                     child: Text(
-                      placing ? 'ऑर्डर भेजा जा रहा है...' : 'ऑर्डर करें • Place Order (₹${_cartTotal.toStringAsFixed(0)})',
+                      placing
+                          ? 'ऑर्डर भेजा जा रहा है...'
+                          : 'ऑर्डर करें • Place Order (₹${_cartTotal.toStringAsFixed(0)})',
                       style: const TextStyle(fontWeight: FontWeight.bold),
                     ),
                   ),
@@ -540,7 +571,8 @@ class _CustomerShellScreenState extends State<CustomerShellScreen> {
   Widget _buildProductCard(Map<String, dynamic> prod) {
     final pid = prod['id'].toString();
     final packs = _packsOf(prod);
-    final pIdx = (_selectedPackIndex[pid] ?? 0).clamp(0, packs.length - 1);
+    final int pIdx =
+        (_selectedPackIndex[pid] ?? 0).clamp(0, packs.length - 1).toInt();
     final activePack = packs[pIdx];
     final price = (activePack['price'] as num?)?.toDouble() ?? 0;
     final mrp = (activePack['mrp'] as num?)?.toDouble() ?? price;
@@ -563,14 +595,21 @@ class _CustomerShellScreenState extends State<CustomerShellScreen> {
                     top: 6,
                     left: 6,
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 2,
+                      ),
                       decoration: BoxDecoration(
                         color: const Color(0xFF1B7A2B),
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: Text(
                         '$disc% OFF',
-                        style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ),
                   ),
@@ -586,10 +625,13 @@ class _CustomerShellScreenState extends State<CustomerShellScreen> {
                   SizedBox(
                     height: 28,
                     child: DropdownButtonFormField<int>(
-                      value: pIdx,
+                      initialValue: pIdx,
                       isDense: true,
                       decoration: const InputDecoration(
-                        contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                        contentPadding: EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 2,
+                        ),
                         border: OutlineInputBorder(),
                       ),
                       items: List.generate(
@@ -603,7 +645,9 @@ class _CustomerShellScreenState extends State<CustomerShellScreen> {
                         ),
                       ),
                       onChanged: (v) {
-                        if (v != null) setState(() => _selectedPackIndex[pid] = v);
+                        if (v != null) {
+                          setState(() => _selectedPackIndex[pid] = v);
+                        }
                       },
                     ),
                   )
@@ -617,14 +661,21 @@ class _CustomerShellScreenState extends State<CustomerShellScreen> {
                   (prod['name'] ?? '').toString(),
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, height: 1.15),
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold,
+                    height: 1.15,
+                  ),
                 ),
                 const SizedBox(height: 4),
                 Row(
                   children: [
                     Text(
                       '₹${price.toStringAsFixed(0)}',
-                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w900),
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w900,
+                      ),
                     ),
                     if (mrp > price) ...[
                       const SizedBox(width: 6),
@@ -645,14 +696,18 @@ class _CustomerShellScreenState extends State<CustomerShellScreen> {
                   height: 32,
                   child: ElevatedButton(
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: inStock ? const Color(0xFF1B7A2B) : Colors.grey.shade400,
+                      backgroundColor:
+                          inStock ? const Color(0xFF1B7A2B) : Colors.grey.shade400,
                       foregroundColor: Colors.white,
                       padding: EdgeInsets.zero,
                     ),
                     onPressed: inStock ? () => _addToCart(prod) : null,
                     child: Text(
                       inStock ? 'Add' : 'Out of Stock',
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5),
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 12.5,
+                      ),
                     ),
                   ),
                 ),
@@ -693,7 +748,10 @@ class _CustomerShellScreenState extends State<CustomerShellScreen> {
                   _savedPincode.isNotEmpty
                       ? 'Delivery PIN: $_savedPincode'
                       : 'ताज़ा फल, सब्ज़ियां व किराना सामान',
-                  style: const TextStyle(color: Color(0xFFE8F5E9), fontSize: 12.5),
+                  style: const TextStyle(
+                    color: Color(0xFFE8F5E9),
+                    fontSize: 12.5,
+                  ),
                 ),
                 const SizedBox(height: 10),
                 ElevatedButton(
@@ -702,13 +760,19 @@ class _CustomerShellScreenState extends State<CustomerShellScreen> {
                     foregroundColor: const Color(0xFF1B7A2B),
                   ),
                   onPressed: () => setState(() => _tabIndex = 1),
-                  child: const Text('सभी श्रेणियां देखें • Shop Now', style: TextStyle(fontWeight: FontWeight.bold)),
+                  child: const Text(
+                    'सभी श्रेणियां देखें • Shop Now',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
                 ),
               ],
             ),
           ),
           const SizedBox(height: 14),
-          const Text('लोकप्रिय सामान • Popular Items', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          const Text(
+            'लोकप्रिय सामान • Popular Items',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+          ),
           const SizedBox(height: 8),
           GridView.builder(
             shrinkWrap: true,
@@ -734,8 +798,8 @@ class _CustomerShellScreenState extends State<CustomerShellScreen> {
         .toList();
 
     final catProducts = _products.where((p) {
-      final matchesCat =
-          _selectedCatId.isEmpty || (p['main_category_id'] ?? '').toString() == _selectedCatId;
+      final matchesCat = _selectedCatId.isEmpty ||
+          (p['main_category_id'] ?? '').toString() == _selectedCatId;
       final matchesSubCat = _selectedSubCatId == 'all' ||
           (p['sub_category_id'] ?? '').toString() == _selectedSubCatId;
       final matchesSearch =
@@ -776,7 +840,11 @@ class _CustomerShellScreenState extends State<CustomerShellScreen> {
                 onChanged: (v) => setState(() => _searchQuery = v),
                 decoration: InputDecoration(
                   hintText: 'सामान खोजें • Search items...',
-                  prefixIcon: const Icon(Icons.search, color: Color(0xFF1B7A2B), size: 20),
+                  prefixIcon: const Icon(
+                    Icons.search,
+                    color: Color(0xFF1B7A2B),
+                    size: 20,
+                  ),
                   suffixIcon: _searchQuery.isNotEmpty
                       ? IconButton(
                           icon: const Icon(Icons.close, size: 18),
@@ -788,7 +856,9 @@ class _CustomerShellScreenState extends State<CustomerShellScreen> {
                       : null,
                   isDense: true,
                   contentPadding: const EdgeInsets.symmetric(vertical: 8),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
                 ),
               ),
               if (activeSubCats.isNotEmpty) ...[
@@ -805,11 +875,14 @@ class _CustomerShellScreenState extends State<CustomerShellScreen> {
                           selected: _selectedSubCatId == 'all',
                           selectedColor: const Color(0xFF1B7A2B),
                           labelStyle: TextStyle(
-                            color: _selectedSubCatId == 'all' ? Colors.white : Colors.black87,
+                            color: _selectedSubCatId == 'all'
+                                ? Colors.white
+                                : Colors.black87,
                             fontSize: 11.5,
                             fontWeight: FontWeight.bold,
                           ),
-                          onSelected: (_) => setState(() => _selectedSubCatId = 'all'),
+                          onSelected: (_) =>
+                              setState(() => _selectedSubCatId = 'all'),
                         ),
                       ),
                       ...activeSubCats.map((sc) {
@@ -826,7 +899,8 @@ class _CustomerShellScreenState extends State<CustomerShellScreen> {
                               fontSize: 11.5,
                               fontWeight: FontWeight.bold,
                             ),
-                            onSelected: (_) => setState(() => _selectedSubCatId = sid),
+                            onSelected: (_) =>
+                                setState(() => _selectedSubCatId = sid),
                           ),
                         );
                       }),
@@ -853,7 +927,10 @@ class _CustomerShellScreenState extends State<CustomerShellScreen> {
                       final hindi = (cat['hindi_name'] ?? '').toString();
                       final eng = (cat['name'] ?? '').toString();
                       final itemCount = _products
-                          .where((p) => (p['main_category_id'] ?? '').toString() == cid)
+                          .where(
+                            (p) =>
+                                (p['main_category_id'] ?? '').toString() == cid,
+                          )
                           .length;
 
                       return InkWell(
@@ -862,12 +939,18 @@ class _CustomerShellScreenState extends State<CustomerShellScreen> {
                           _selectedSubCatId = 'all';
                         }),
                         child: Container(
-                          padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 6),
+                          padding: const EdgeInsets.symmetric(
+                            vertical: 9,
+                            horizontal: 6,
+                          ),
                           decoration: BoxDecoration(
-                            color: selected ? const Color(0xFFE8F5E9) : Colors.white,
+                            color:
+                                selected ? const Color(0xFFE8F5E9) : Colors.white,
                             border: Border(
                               left: BorderSide(
-                                color: selected ? const Color(0xFF1B7A2B) : Colors.transparent,
+                                color: selected
+                                    ? const Color(0xFF1B7A2B)
+                                    : Colors.transparent,
                                 width: 3.5,
                               ),
                             ),
@@ -875,7 +958,11 @@ class _CustomerShellScreenState extends State<CustomerShellScreen> {
                           child: Column(
                             children: [
                               ClipOval(
-                                child: _netImage(cat['image_url']?.toString(), width: 46, height: 46),
+                                child: _netImage(
+                                  cat['image_url']?.toString(),
+                                  width: 46,
+                                  height: 46,
+                                ),
                               ),
                               const SizedBox(height: 4),
                               Text(
@@ -885,7 +972,9 @@ class _CustomerShellScreenState extends State<CustomerShellScreen> {
                                 overflow: TextOverflow.ellipsis,
                                 style: TextStyle(
                                   fontSize: 11,
-                                  fontWeight: selected ? FontWeight.bold : FontWeight.w600,
+                                  fontWeight: selected
+                                      ? FontWeight.bold
+                                      : FontWeight.w600,
                                 ),
                               ),
                               if (eng.isNotEmpty && hindi.isNotEmpty)
@@ -894,7 +983,10 @@ class _CustomerShellScreenState extends State<CustomerShellScreen> {
                                   textAlign: TextAlign.center,
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(fontSize: 9.5, color: Colors.black54),
+                                  style: const TextStyle(
+                                    fontSize: 9.5,
+                                    color: Colors.black54,
+                                  ),
                                 ),
                               Text(
                                 '$itemCount',
@@ -926,13 +1018,15 @@ class _CustomerShellScreenState extends State<CustomerShellScreen> {
                       : GridView.builder(
                           padding: const EdgeInsets.all(8),
                           itemCount: catProducts.length,
-                          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                          gridDelegate:
+                              const SliverGridDelegateWithFixedCrossAxisCount(
                             crossAxisCount: 2,
                             childAspectRatio: 0.65,
                             crossAxisSpacing: 8,
                             mainAxisSpacing: 8,
                           ),
-                          itemBuilder: (_, i) => _buildProductCard(catProducts[i]),
+                          itemBuilder: (_, i) =>
+                              _buildProductCard(catProducts[i]),
                         ),
                 ),
               ),
@@ -961,7 +1055,8 @@ class _CustomerShellScreenState extends State<CustomerShellScreen> {
                 final ord = _orders[i];
                 final status = (ord['status'] ?? 'Pending').toString();
                 final total = ord['total_amount'] ?? 0;
-                final items = ord['items'] is List ? List.from(ord['items'] as List) : [];
+                final items =
+                    ord['items'] is List ? List.from(ord['items'] as List) : [];
 
                 return Card(
                   color: Colors.white,
@@ -976,9 +1071,18 @@ class _CustomerShellScreenState extends State<CustomerShellScreen> {
                           children: [
                             Text(
                               'Order • $status',
-                              style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF1B7A2B)),
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                color: Color(0xFF1B7A2B),
+                              ),
                             ),
-                            Text('₹$total', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 15)),
+                            Text(
+                              '₹$total',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w900,
+                                fontSize: 15,
+                              ),
+                            ),
                           ],
                         ),
                         const SizedBox(height: 4),
@@ -1011,7 +1115,10 @@ class _CustomerShellScreenState extends State<CustomerShellScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('Customer Details', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+                const Text(
+                  'Customer Details',
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                ),
                 const SizedBox(height: 8),
                 TextField(
                   controller: nameCtrl,
@@ -1088,7 +1195,10 @@ class _CustomerShellScreenState extends State<CustomerShellScreen> {
         Card(
           color: Colors.white,
           child: ListTile(
-            leading: const Icon(Icons.shopping_cart_outlined, color: Color(0xFF1B7A2B)),
+            leading: const Icon(
+              Icons.shopping_cart_outlined,
+              color: Color(0xFF1B7A2B),
+            ),
             title: Text('Cart Items: $_cartCount'),
             subtitle: Text('Total: ₹${_cartTotal.toStringAsFixed(0)}'),
             trailing: ElevatedButton(
@@ -1109,7 +1219,9 @@ class _CustomerShellScreenState extends State<CustomerShellScreen> {
   Widget build(BuildContext context) {
     Widget currentBody;
     if (_loading) {
-      currentBody = const Center(child: CircularProgressIndicator(color: Color(0xFF1B7A2B)));
+      currentBody = const Center(
+        child: CircularProgressIndicator(color: Color(0xFF1B7A2B)),
+      );
     } else if (_error != null) {
       currentBody = Center(
         child: Padding(
@@ -1141,7 +1253,9 @@ class _CustomerShellScreenState extends State<CustomerShellScreen> {
               foregroundColor: Colors.white,
               onPressed: _openCartAndCheckout,
               icon: const Icon(Icons.shopping_bag),
-              label: Text('Cart ($_cartCount) • ₹${_cartTotal.toStringAsFixed(0)}'),
+              label: Text(
+                'Cart ($_cartCount) • ₹${_cartTotal.toStringAsFixed(0)}',
+              ),
             )
           : null,
       bottomNavigationBar: NavigationBar(
@@ -1149,10 +1263,26 @@ class _CustomerShellScreenState extends State<CustomerShellScreen> {
         indicatorColor: const Color(0xFFE8F5E9),
         onDestinationSelected: (i) => setState(() => _tabIndex = i),
         destinations: const [
-          NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home), label: 'Home'),
-          NavigationDestination(icon: Icon(Icons.grid_view_outlined), selectedIcon: Icon(Icons.grid_view), label: 'Categories'),
-          NavigationDestination(icon: Icon(Icons.receipt_long_outlined), selectedIcon: Icon(Icons.receipt_long), label: 'Orders'),
-          NavigationDestination(icon: Icon(Icons.person_outline), selectedIcon: Icon(Icons.person), label: 'Profile'),
+          NavigationDestination(
+            icon: Icon(Icons.home_outlined),
+            selectedIcon: Icon(Icons.home),
+            label: 'Home',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.grid_view_outlined),
+            selectedIcon: Icon(Icons.grid_view),
+            label: 'Categories',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.receipt_long_outlined),
+            selectedIcon: Icon(Icons.receipt_long),
+            label: 'Orders',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.person_outline),
+            selectedIcon: Icon(Icons.person),
+            label: 'Profile',
+          ),
         ],
       ),
     );
